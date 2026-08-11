@@ -137,7 +137,9 @@ export class Fur {
                if (strand < vShell) discard;
                // Light does not reach the base of a coat: darken toward the
                // skin. This is what stops the fur looking like a flat decal.
-               diffuseColor.rgb *= mix(uRootDark, 1.04, vShell);
+               // Never brighter than the coat's own colour: pushing tips above
+               // 1.0 is free fuel for bloom, and white fur needs no help.
+               diffuseColor.rgb *= mix(uRootDark, 1.0, vShell);
                // Water darkens a coat and kills its sheen.
                diffuseColor.rgb *= mix(1.0, 0.6, uWet);
              }`

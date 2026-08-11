@@ -61,9 +61,16 @@ const fur = new Fur().apply(dog.root);
 const follow = new FollowCamera(camera, world, RAPIER);
 follow.distance = 5.5; // pulled in: the forest is tight and the fog is close
 
-// Sam's own pool of light. This is the "circle of vision" -- nearly everything
-// the player can see, they can see because of this lamp.
-const lamp = new THREE.PointLight(0xffe9c9, 26, 15, 2);
+// Sam's own pool of light -- the "circle of vision". Nearly everything the
+// player can see, they can see because of this lamp.
+//
+// It hangs ABOVE him, not on him. A point light sitting inside the dog is only
+// centimetres from white fur, and with inverse-square falloff that lights his
+// coat about ten times as hard as it lights the ground: he blows out to pure
+// white and bloom turns him into a sun. Lifting the light and softening its
+// falloff keeps the pool on the ground while leaving the dog merely lit.
+const LAMP_HEIGHT = 2.4;
+const lamp = new THREE.PointLight(0xffe9c9, 46, 18, 1.35);
 lamp.castShadow = false; // a second shadow-casting point light is not worth it
 scene.add(lamp);
 
@@ -84,11 +91,14 @@ scene.add(contact);
 // it is how a camera and an eye both actually behave.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+// Bloom runs before tone mapping, so it sees raw linear light values that go
+// well above 1. The threshold has to be set in those terms, not in 0-1 screen
+// terms, or ordinary lit surfaces start glowing.
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(innerWidth, innerHeight),
-  0.62, // strength
-  0.75, // radius
-  0.55 // threshold: only the fire, the lamp and highlights on water
+  0.5, // strength
+  0.7, // radius
+  1.15 // threshold: the flames and lantern, not anything merely well lit
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -144,7 +154,7 @@ function frame(now) {
   follow.update(dt, input, pos);
   world.step();
 
-  lamp.position.set(pos.x, pos.y + 0.95, pos.z);
+  lamp.position.set(pos.x, pos.y + LAMP_HEIGHT, pos.z);
   contact.position.set(pos.x, pos.y + 0.02, pos.z);
   contact.visible = state.grounded && state.submersion < 0.15;
 
@@ -204,4 +214,6 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 
-window.SAM = { player, follow, woods, scene, world, CAMP };
+// Exposed so the look can be tuned live from the console, e.g.
+//   SAM.bloom.threshold = 1.4;  SAM.lamp.intensity = 60;
+window.SAM = { player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur };
