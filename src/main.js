@@ -8,6 +8,11 @@ import { Fur } from './fur.js';
 import { Woods, SPAWN, CAMP, radialTexture } from './woods.js';
 import { Water } from './water.js';
 import { Droplets, Ripples } from './effects.js';
+import { updateWind } from './trees.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 await RAPIER.init();
 
@@ -25,6 +30,11 @@ const camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.1, 30
 
 const world = new RAPIER.World({ x: 0, y: 0, z: 0 }); // gravity is in the controller
 const woods = new Woods(scene, RAPIER, world);
+console.log(
+  `SAM: forest built — ${woods.forest.counts.trees} trees, ` +
+  `${woods.forest.counts.cards} foliage cards, ` +
+  `${world.colliders.len()} colliders`
+);
 const water = new Water(scene);
 const droplets = new Droplets(scene);
 const ripples = new Ripples(scene);
@@ -69,10 +79,26 @@ const contact = new THREE.Mesh(
 contact.rotation.x = -Math.PI / 2;
 scene.add(contact);
 
+// Bloom. In a night scene lit by one lamp and one fire, letting the bright
+// things bleed into the dark does more for realism than any extra geometry --
+// it is how a camera and an eye both actually behave.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight),
+  0.62, // strength
+  0.75, // radius
+  0.55 // threshold: only the fire, the lamp and highlights on water
+);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  bloom.setSize(innerWidth, innerHeight);
 });
 
 // ----------------------------------------------------------------- stage ---
@@ -122,6 +148,7 @@ function frame(now) {
   contact.position.set(pos.x, pos.y + 0.02, pos.z);
   contact.visible = state.grounded && state.submersion < 0.15;
 
+  updateWind(dt);
   const stage = woods.update(dt, pos);
   if (stage.arrived && !arrived) finish();
 
@@ -162,7 +189,7 @@ function frame(now) {
   scene.updateMatrixWorld();
   fur.update(wind);
 
-  renderer.render(scene, camera);
+  composer.render();
 
   statsTimer += dt;
   if (statsTimer > 0.15) {

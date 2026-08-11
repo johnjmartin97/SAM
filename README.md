@@ -55,7 +55,9 @@ than showing nothing.
 | File | What it owns |
 | --- | --- |
 | `src/player.js` | How it feels to move. All the tuning numbers are at the top in `TUNING`. |
-| `src/woods.js` | The forest: tree species, boulders, campsite, darkness, win condition. |
+| `src/woods.js` | Lays out the level: what goes where, the campsite, darkness, win condition. |
+| `src/trees.js` | The nine tree species, how a tree is built, and foliage collision. |
+| `src/textures.js` | Every texture in the game, drawn in code on a canvas. Nothing is downloaded. |
 | `src/terrain.js` | The shape of the ground, including the river valley. One height function feeds the mesh, the physics and every object's placement. |
 | `src/water.js` | The river surface. The shader knows the terrain shape, so the water clips itself exactly at the shoreline. |
 | `src/effects.js` | Splashes, wake rings and the drips off a wet dog. |
@@ -64,6 +66,28 @@ than showing nothing.
 | `src/camera.js` | The follow camera, including pulling in when a tree is behind you. |
 | `src/level.js` | The old daylight platformer level. Not currently loaded; kept for later. |
 | `tools/blender/make_samoyed.py` | The model itself. |
+
+### How a tree is made
+
+A tree is a trunk mesh plus a few dozen flat cards, each carrying an alpha-cut
+picture of a needle spray or leaf clump drawn by `src/textures.js`. That is how
+real-time engines build trees, and it is what gives a ragged edge you can see
+through instead of a clean green cone.
+
+The whole forest is 640 trees and about 26,000 cards, but all conifer foliage
+is a single draw call and all broadleaf foliage another. Per-instance colour
+means no two trees are quite the same shade.
+
+Nine species: scots pine, norway spruce, young fir, silver birch, oak, beech,
+dead snag, sapling and stump — plus bushes, bramble, fallen logs and boulders.
+
+**Collision.** Trunks, boulders and logs block you. So does foliage: every
+canopy has a collider, which above head height mostly stops the *camera* from
+flying through branches. The species that skirt the ground — young firs,
+saplings, bushes — are what actually block Sam, so the floor is something to
+pick through rather than a plane with scenery painted on it. Bramble is
+deliberately left non-solid; making it solid turns a dark forest into a maze
+you cannot walk in.
 
 ### Tuning the darkness
 

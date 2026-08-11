@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { forestFloor, normalFromCanvas } from './textures.js';
 
 // The ground, and the river valley cut into it.
 //
@@ -111,11 +112,19 @@ export function buildTerrainMesh(segments = 168) {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
 
+  // Detail texture on top of the vertex colours: the colours give the broad
+  // wet/dry/mossy zoning, the texture gives needles and stones underfoot. A
+  // normal map derived from it is what makes the ground catch Sam's lamp as
+  // it sweeps past, which at this scale matters more than the colour does.
+  const floor = forestFloor(11);
   const mesh = new THREE.Mesh(
     geo,
     new THREE.MeshStandardMaterial({
+      map: floor.map,
+      normalMap: normalFromCanvas(floor.canvas, 1.8),
+      normalScale: new THREE.Vector2(1.5, 1.5),
       vertexColors: true,
-      roughness: 1,
+      roughness: 0.97,
       metalness: 0,
     })
   );

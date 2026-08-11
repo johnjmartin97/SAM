@@ -6,6 +6,8 @@ import {
   buildTerrainMesh,
   buildTerrainCollider,
 } from './terrain.js';
+import { buildForest, buildUndergrowth } from './trees.js';
+import { stone } from './textures.js';
 
 // A dark pine forest with a river through it and a campsite somewhere beyond.
 //
@@ -14,26 +16,18 @@ import {
 // rather than by layout. The campfire glow is the one thing that carries
 // through the fog, which makes it the beacon the whole level is built around.
 
-const TREE_COUNT = 620;
-const FERN_COUNT = 900;
-const ROCK_COUNT = 140;
-const BOULDER_COUNT = 46;
-const LOG_COUNT = 34;
+const TREE_COUNT = 640;
+const BUSH_COUNT = 300;
+const BRAMBLE_COUNT = 620;
+const ROCK_COUNT = 150;
+const BOULDER_COUNT = 52;
+const LOG_COUNT = 38;
 
 // Spawn and campsite sit on opposite banks, so the river always has to be
 // crossed. Their heights come from the terrain, not from guesswork.
 export const SPAWN = new THREE.Vector3(4, heightAt(4, 62) + 0.8, 62);
 export const CAMP = new THREE.Vector3(-10, heightAt(-10, -52), -52);
 export const GOAL_RADIUS = 5.5;
-
-// How the forest is mixed. Weights need not sum to 1.
-const SPECIES = [
-  { kind: 'pine', weight: 0.36 },
-  { kind: 'spruce', weight: 0.26 },
-  { kind: 'birch', weight: 0.18 },
-  { kind: 'dead', weight: 0.13 },
-  { kind: 'stump', weight: 0.07 },
-];
 
 const SPAWN_CLEARING = 7;
 const CAMP_CLEARING = 11;
@@ -170,191 +164,29 @@ export class Woods {
     return points;
   }
 
-  /** Pick a species by weight. */
-  _species() {
-    const total = SPECIES.reduce((s, k) => s + k.weight, 0);
-    let r = this.rand() * total;
-    for (const s of SPECIES) {
-      r -= s.weight;
-      if (r <= 0) return s.kind;
-    }
-    return SPECIES[0].kind;
-  }
-
-  /** A trunk collider, so every standing thing is something you bump into. */
-  _trunkCollider(x, y, z, height, radius) {
-    const body = this.world.createRigidBody(
-      this.RAPIER.RigidBodyDesc.fixed().setTranslation(x, y + height / 2, z)
-    );
-    this.world.createCollider(
-      this.RAPIER.ColliderDesc.cylinder(height / 2, radius),
-      body
-    );
-  }
-
   _buildTrees() {
-    const spots = this._scatter(TREE_COUNT, 3.0, [
+    const spots = this._scatter(TREE_COUNT, 2.6, [
       [SPAWN.x, SPAWN.z, SPAWN_CLEARING],
       [CAMP.x, CAMP.z, CAMP_CLEARING],
     ]);
-
-    // Sort every spot into a species first, so each instanced mesh can be
-    // allocated at exactly the size it needs.
-    const byKind = { pine: [], spruce: [], birch: [], dead: [], stump: [] };
-    for (const p of spots) byKind[this._species()].push(p);
-
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const pos = new THREE.Vector3();
-    const scl = new THREE.Vector3();
-    const add = (im) => {
-      im.instanceMatrix.needsUpdate = true;
-      im.castShadow = true;
-      im.receiveShadow = true;
-      this.scene.add(im);
-    };
-
-    const trunkGeo = new THREE.CylinderGeometry(0.17, 0.3, 1, 6);
-    trunkGeo.translate(0, 0.5, 0); // origin at the base, so scaling grows up
-
-    // ---- pines: two broad conical tiers, the workhorse of the forest ----
-    {
-      const list = byKind.pine;
-      const trunks = new THREE.InstancedMesh(trunkGeo, standard(0x261c14), list.length);
-      const lower = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 7),
-        standard(0x12220f), list.length);
-      const upper = new THREE.InstancedMesh(new THREE.ConeGeometry(0.68, 1, 7),
-        standard(0x16290f), list.length);
-
-      list.forEach((p, i) => {
-        const h = 6.5 + this.rand() * 6.5;
-        const girth = 0.8 + this.rand() * 0.6;
-        const spread = 1.5 + this.rand() * 0.9;
-        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
-
-        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
-        trunks.setMatrixAt(i, m);
-        const base = p.y + h * 0.34;
-        m.compose(pos.set(p.x, base, p.z), q, scl.set(spread, h * 0.52, spread));
-        lower.setMatrixAt(i, m);
-        m.compose(pos.set(p.x, base + h * 0.34, p.z), q,
-          scl.set(spread * 0.82, h * 0.46, spread * 0.82));
-        upper.setMatrixAt(i, m);
-
-        this._trunkCollider(p.x, p.y, p.z, h, 0.34 * girth);
-      });
-      [trunks, lower, upper].forEach(add);
-    }
-
-    // ---- spruces: taller, much narrower, three tight tiers ----
-    {
-      const list = byKind.spruce;
-      const trunks = new THREE.InstancedMesh(trunkGeo, standard(0x21180f), list.length);
-      const tiers = [0, 1, 2].map(() => new THREE.InstancedMesh(
-        new THREE.ConeGeometry(1, 1, 6), standard(0x0d1c10), list.length));
-
-      list.forEach((p, i) => {
-        const h = 9 + this.rand() * 7;
-        const girth = 0.6 + this.rand() * 0.35;
-        const spread = 0.95 + this.rand() * 0.5;
-        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
-
-        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
-        trunks.setMatrixAt(i, m);
-        for (let k = 0; k < 3; k++) {
-          const t = k / 3;
-          m.compose(
-            pos.set(p.x, p.y + h * (0.25 + t * 0.26), p.z), q,
-            scl.set(spread * (1 - t * 0.32), h * 0.4, spread * (1 - t * 0.32))
-          );
-          tiers[k].setMatrixAt(i, m);
-        }
-        this._trunkCollider(p.x, p.y, p.z, h, 0.3 * girth);
-      });
-      [trunks, ...tiers].forEach(add);
-    }
-
-    // ---- birches: pale straight trunks, round crowns. They catch the lamp
-    //      and are the main thing that stops the forest reading as one tree
-    //      repeated six hundred times. ----
-    {
-      const list = byKind.birch;
-      const trunks = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(0.13, 0.17, 1, 7).translate(0, 0.5, 0),
-        standard(0x9a9384), list.length);
-      const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1),
-        standard(0x2c3a1c), list.length);
-
-      list.forEach((p, i) => {
-        const h = 7 + this.rand() * 5;
-        const girth = 0.75 + this.rand() * 0.5;
-        const spread = 1.5 + this.rand() * 0.8;
-        const lean = (this.rand() - 0.5) * 0.13;
-        q.setFromEuler(new THREE.Euler(lean, this.rand() * Math.PI * 2, lean * 0.6));
-
-        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
-        trunks.setMatrixAt(i, m);
-        m.compose(pos.set(p.x + lean * h * 0.5, p.y + h * 0.86, p.z), q,
-          scl.set(spread, spread * 0.85, spread));
-        crown.setMatrixAt(i, m);
-
-        this._trunkCollider(p.x, p.y, p.z, h, 0.22 * girth);
-      });
-      [trunks, crown].forEach(add);
-    }
-
-    // ---- dead trees: bare, forked, no canopy. Pure silhouette. ----
-    {
-      const list = byKind.dead;
-      const trunks = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(0.06, 0.28, 1, 6).translate(0, 0.5, 0),
-        standard(0x342a20), list.length);
-      const limbs = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(0.045, 0.1, 1, 5).translate(0, 0.5, 0),
-        standard(0x342a20), list.length * 3);
-
-      let li = 0;
-      list.forEach((p, i) => {
-        const h = 5.5 + this.rand() * 5;
-        const girth = 0.7 + this.rand() * 0.6;
-        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
-        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
-        trunks.setMatrixAt(i, m);
-
-        for (let k = 0; k < 3; k++) {
-          const a = this.rand() * Math.PI * 2;
-          const tilt = 0.7 + this.rand() * 0.5;
-          q.setFromEuler(new THREE.Euler(Math.sin(a) * tilt, a, Math.cos(a) * tilt));
-          m.compose(
-            pos.set(p.x, p.y + h * (0.5 + this.rand() * 0.42), p.z), q,
-            scl.set(1, 1.2 + this.rand() * 1.6, 1)
-          );
-          limbs.setMatrixAt(li++, m);
-        }
-        this._trunkCollider(p.x, p.y, p.z, h, 0.26 * girth);
-      });
-      while (li < list.length * 3) limbs.setMatrixAt(li++, m.makeScale(0, 0, 0));
-      [trunks, limbs].forEach(add);
-    }
-
-    // ---- stumps: knee height, easy to miss in the dark, easy to trip on ----
-    {
-      const list = byKind.stump;
-      const stumps = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(0.42, 0.55, 1, 8).translate(0, 0.5, 0),
-        standard(0x2b2119), list.length);
-      list.forEach((p, i) => {
-        const h = 0.5 + this.rand() * 0.7;
-        const girth = 0.8 + this.rand() * 0.7;
-        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
-        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
-        stumps.setMatrixAt(i, m);
-        this._trunkCollider(p.x, p.y, p.z, h, 0.5 * girth);
-      });
-      add(stumps);
-    }
-
+    this.forest = buildForest(this.scene, this.RAPIER, this.world, spots, this.rand);
+    this._buildUndergrowth();
     this._buildFallenLogs();
+  }
+
+  _buildUndergrowth() {
+    // Bushes get collision -- pushing through undergrowth is the point.
+    // Bramble does not, or a dark forest floor becomes impassable.
+    const bushes = this._scatter(BUSH_COUNT, 2.4, [
+      [SPAWN.x, SPAWN.z, SPAWN_CLEARING * 0.7],
+      [CAMP.x, CAMP.z, CAMP_CLEARING * 0.8],
+    ], 0.45);
+    buildUndergrowth(this.scene, this.RAPIER, this.world, bushes, this.rand,
+      { collide: true });
+
+    const bramble = this._scatter(BRAMBLE_COUNT, 1.3, [], 0.1);
+    buildUndergrowth(this.scene, this.RAPIER, this.world, bramble, this.rand,
+      { collide: false });
   }
 
   /** Logs lying on the ground: obstacles you jump rather than walk round. */
@@ -411,30 +243,15 @@ export class Woods {
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
 
-    // --- ferns: dressing only, no collision. They keep the ground from
-    //     reading as an empty plane when the lamp sweeps across it. ---
-    const ferns = new THREE.InstancedMesh(
-      new THREE.ConeGeometry(0.42, 0.75, 5, 1, true),
-      standard(0x203318, { side: THREE.DoubleSide }),
-      FERN_COUNT
-    );
-    for (let i = 0; i < FERN_COUNT; i++) {
-      const x = (this.rand() * 2 - 1) * (WORLD - 2);
-      const z = (this.rand() * 2 - 1) * (WORLD - 2);
-      const y = heightAt(x, z);
-      const s = 0.6 + this.rand() * 0.9;
-      // Ferns crowd the damp ground near the river, and thin out up the slope.
-      const damp = y - WATER_Y < 2.2 ? 1 : 0.55;
-      q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
-      const scale = y > WATER_Y + 0.15 ? s * damp : 0; // never in the water
-      m.compose(pos.set(x, y, z), q,
-        scl.set(scale, scale * (0.7 + this.rand() * 0.6), scale));
-      ferns.setMatrixAt(i, m);
-    }
-
     // --- pebbles: small, decorative, allowed in the shallows ---
+    const stoneTex = stone(17);
+    this.stoneMaterial = new THREE.MeshStandardMaterial({
+      map: stoneTex.map,
+      roughness: 0.92,
+      metalness: 0,
+    });
     const rocks = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(0.5, 0), standard(0x33383a), ROCK_COUNT
+      new THREE.IcosahedronGeometry(0.5, 1), this.stoneMaterial, ROCK_COUNT
     );
     for (let i = 0; i < ROCK_COUNT; i++) {
       const x = (this.rand() * 2 - 1) * (WORLD - 2);
@@ -448,7 +265,7 @@ export class Woods {
       rocks.setMatrixAt(i, m);
     }
 
-    for (const im of [ferns, rocks]) {
+    for (const im of [rocks]) {
       im.instanceMatrix.needsUpdate = true;
       im.receiveShadow = true;
       this.scene.add(im);
@@ -468,9 +285,10 @@ export class Woods {
       [CAMP.x, CAMP.z, CAMP_CLEARING * 0.7],
     ], -1.4); // allowed to sit in the river, breaking up the current
 
-    const geo = new THREE.IcosahedronGeometry(1, 0);
-    const boulders = new THREE.InstancedMesh(geo, standard(0x3c4145), spots.length);
-    const base = geo.attributes.position.array;
+    // Subdivided once so the bumps read as rock rather than a d20.
+    const geo = new THREE.IcosahedronGeometry(1, 1);
+    const boulders = new THREE.InstancedMesh(geo, this.stoneMaterial, spots.length);
+    const hullSource = new THREE.IcosahedronGeometry(1, 0).attributes.position.array;
 
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
@@ -491,11 +309,11 @@ export class Woods {
       boulders.setMatrixAt(i, m);
 
       // Same vertices, same scale -- the hull is the drawn shape.
-      const hull = new Float32Array(base.length);
-      for (let v = 0; v < base.length; v += 3) {
-        hull[v] = base[v] * sx;
-        hull[v + 1] = base[v + 1] * sy;
-        hull[v + 2] = base[v + 2] * sz;
+      const hull = new Float32Array(hullSource.length);
+      for (let v = 0; v < hullSource.length; v += 3) {
+        hull[v] = hullSource[v] * sx;
+        hull[v + 1] = hullSource[v + 1] * sy;
+        hull[v + 2] = hullSource[v + 2] * sz;
       }
       const desc = this.RAPIER.ColliderDesc.convexHull(hull);
       if (!desc) return; // degenerate hull: skip rather than crash
