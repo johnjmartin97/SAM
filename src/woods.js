@@ -3,6 +3,7 @@ import {
   WORLD,
   WATER_Y,
   RIVER_ROCKS,
+  riverZ,
   heightAt,
   buildTerrainMesh,
   buildTerrainCollider,
@@ -608,25 +609,41 @@ export class Woods {
   // ----------------------------------------------------------- fireflies ---
 
   _buildFireflies() {
-    const count = 220;
+    const count = 460;
     const positions = new Float32Array(count * 3);
     this.fireflySeed = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    this.fireflyPhase = new Float32Array(count);
+
     for (let i = 0; i < count; i++) {
-      const x = (this.rand() * 2 - 1) * (WORLD - 6);
-      const z = (this.rand() * 2 - 1) * (WORLD - 6);
+      let x, z;
+      // Two thirds cluster along the river, where the damp air and the midges
+      // are. The rest are scattered through the woods.
+      if (this.rand() < 0.62) {
+        x = (this.rand() * 2 - 1) * (WORLD - 8);
+        z = riverZ(x) + (this.rand() * 2 - 1) * 16;
+      } else {
+        x = (this.rand() * 2 - 1) * (WORLD - 6);
+        z = (this.rand() * 2 - 1) * (WORLD - 6);
+      }
       // Fireflies hover just above whatever the ground is doing, including
       // drifting low over the water.
-      const y = Math.max(WATER_Y, heightAt(x, z)) + 0.4 + this.rand() * 2.2;
+      const y = Math.max(WATER_Y, heightAt(x, z)) + 0.35 + this.rand() * 2.4;
       positions.set([x, y, z], i * 3);
       this.fireflySeed.set([x, y, z], i * 3);
+      this.fireflyPhase[i] = this.rand() * Math.PI * 2;
+      colors.set([0.74, 1, 0.54], i * 3);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     this.fireflies = new THREE.Points(
       geo,
       new THREE.PointsMaterial({
-        color: 0xbdff8a,
-        size: 0.13,
+        // Without a map, points render as hard squares.
+        map: radialTexture('190,255,150', 1, 1.4),
+        vertexColors: true,
+        size: 0.16,
         sizeAttenuation: true,
         transparent: true,
         opacity: 0.85,
@@ -687,6 +704,20 @@ export class Woods {
       arr[i + 2] = sz + Math.cos(t * 0.42 + sz) * 0.9;
     }
     this.fireflies.geometry.attributes.position.needsUpdate = true;
+
+    // Fireflies pulse rather than glowing steadily -- that on-off rhythm is
+    // most of what makes them read as insects instead of floating dots.
+    const col = this.fireflies.geometry.attributes.color.array;
+    for (let i = 0, c = 0; c < col.length; i++, c += 3) {
+      const pulse = Math.pow(
+        Math.max(0, Math.sin(t * 1.9 + this.fireflyPhase[i])), 3
+      );
+      const b = 0.12 + pulse * 1.5;
+      col[c] = 0.74 * b;
+      col[c + 1] = 1.0 * b;
+      col[c + 2] = 0.54 * b;
+    }
+    this.fireflies.geometry.attributes.color.needsUpdate = true;
 
     // The owner waves as Sam comes into view of the camp.
     const dist = playerPos.distanceTo(CAMP);

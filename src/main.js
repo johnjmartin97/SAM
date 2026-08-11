@@ -8,6 +8,8 @@ import { Fur } from './fur.js';
 import { Woods, SPAWN, CAMP, radialTexture } from './woods.js';
 import { Water } from './water.js';
 import { Droplets, Ripples } from './effects.js';
+import { Ambience } from './audio.js';
+import { Wildlife, loadAnimals } from './wildlife.js';
 import { updateWind } from './trees.js';
 import { applyCharacterExposure } from './character.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -55,6 +57,15 @@ try {
   console.warn('SAM: falling back to the placeholder dog —', err.message);
   dog = createSamoyed();
 }
+
+const ambience = new Ambience();
+// Browsers refuse to start audio until the user does something; the existing
+// click-to-look is the natural moment.
+renderer.domElement.addEventListener('click', () => ambience.start(), { once: true });
+
+// The other animals. Ambient only: nothing here threatens Sam.
+const animalModels = await loadAnimals();
+const wildlife = new Wildlife(scene, animalModels, Math.random);
 
 const input = new Input(renderer.domElement);
 const player = new Player(scene, RAPIER, world, dog, { spawn: SPAWN, killY: -20 });
@@ -167,14 +178,21 @@ function frame(now) {
   contact.visible = state.grounded && state.submersion < 0.15;
 
   updateWind(dt);
+  wildlife.update(dt, pos, state.swimming);
   const stage = woods.update(dt, pos);
   if (stage.arrived && !arrived) finish();
 
   // ---- water ----
   water.update(dt);
 
-  if (state.entered) droplets.splash(pos, 55, 1.15);
-  if (state.startedShake) shakeSpray = 0.75;
+  if (state.entered) {
+    droplets.splash(pos, 55, 1.15);
+    ambience.splash(1);
+  }
+  if (state.startedShake) {
+    shakeSpray = 0.75;
+    ambience.shake();
+  }
 
   // A swimming or wading dog leaves a wake.
   ripples.update(dt, state.submersion > 0.12 && state.speed > 0.6, pos.x, pos.z);
@@ -200,6 +218,15 @@ function frame(now) {
   }
 
   droplets.update(dt);
+  ambience.update(dt, {
+    position: pos,
+    speed: state.speed,
+    grounded: state.grounded,
+    submersion: state.submersion,
+    wetness: state.wetness,
+    campDistance: stage.distance,
+  });
+
   fur.setWetness(state.wetness);
 
   wind.copy(player.velocity).multiplyScalar(-0.009);
@@ -226,6 +253,7 @@ requestAnimationFrame(frame);
 //   SAM.exposure.exposure = 0.04;  // how brightly Sam responds to light
 //   SAM.bloom.threshold = 1.4;  SAM.lamp.intensity = 60;
 window.SAM = {
-  player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur,
+  player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur, ambience,
+  wildlife,
   exposure: samExposure,
 };

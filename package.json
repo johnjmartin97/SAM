@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "model": "blender --background --python tools/blender/make_samoyed.py"
+    "model": "blender --background --python tools/blender/make_samoyed.py",
+    "animals": "blender --background --python tools/blender/make_animals.py"
   },
   "license": "ISC",
   "dependencies": {
