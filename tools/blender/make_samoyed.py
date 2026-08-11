@@ -20,7 +20,6 @@ instead, which never negates -- a negative scale would turn the mesh inside out.
 
 import math
 import os
-import random
 
 import bpy
 from mathutils import Matrix, Vector
@@ -38,8 +37,14 @@ DARK = (0.086, 0.086, 0.102, 1.0)
 TONGUE = (0.862, 0.435, 0.463, 1.0)
 INNER_EAR = (0.902, 0.706, 0.686, 1.0)
 
-# Bumping these is the single knob for how dense the mesh is.
-SEG, RING = 32, 16
+# The blobs are only rough input -- the voxel remesh resamples them into one
+# continuous skin -- so they do not need to be dense.
+SEG, RING = 16, 8
+
+# Voxel size for that remesh, then a triangle budget per part. The budget
+# matters because the fur shader redraws each part once per shell layer.
+VOXEL = 0.022
+BUDGET = {"body": 7000, "head": 5000, "tail": 4000, "leg": 2500}
 
 
 def pt(v):
@@ -56,7 +61,6 @@ def dim(v):
 
 def reset_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    random.seed(7)  # fluff is scattered, but the same way every run
 
 
 def material(name, rgba, rough=0.72):
@@ -150,26 +154,49 @@ def smooth(obj, angle=52.0):
     bpy.ops.object.select_all(action='DESELECT')
 
 
-def tufts(around, radius, count, size, mat, pivot, name, spread=0.22):
-    """A ring of small blobs -- the trick that turns a smooth shape fluffy."""
-    out = []
-    cx, cy, cz = around
-    for i in range(count):
-        a = (i / count) * math.tau + random.uniform(-0.15, 0.15)
-        r = radius * random.uniform(0.9, 1.12)
-        p = (cx + math.cos(a) * r,
-             cy + math.sin(a) * r * 0.85 + random.uniform(-spread, spread) * 0.3,
-             cz + random.uniform(-spread, spread))
-        k = size * random.uniform(0.75, 1.25)
-        out.append(shape("sphere", (k, k * 0.9, k), p, pivot=pivot, mat=mat, name=name))
-    return out
+def _apply(obj, mod):
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.ops.object.select_all(action='DESELECT')
+
+
+def skin(name, blobs, mat, budget):
+    """Fuse overlapping blobs into ONE continuous surface.
+
+    This is the difference between a dog and a pile of snowballs. A voxel
+    remesh throws away the input topology and re-skins the union of the
+    shapes, so the seams where blobs overlap simply stop existing. The result
+    is dense, so it is then decimated down to a triangle budget.
+    """
+    main = join_into(blobs[0], blobs[1:])
+    main.name = name
+
+    main.data.materials.clear()
+    main.data.materials.append(mat)
+
+    m = main.modifiers.new("Remesh", 'REMESH')
+    m.mode = 'VOXEL'
+    m.voxel_size = VOXEL
+    m.adaptivity = 0.0
+    _apply(main, m)
+
+    main.data.calc_loop_triangles()
+    current = len(main.data.loop_triangles)
+    if current > budget:
+        d = main.modifiers.new("Decimate", 'DECIMATE')
+        d.decimate_type = 'COLLAPSE'
+        d.ratio = budget / current
+        _apply(main, d)
+
+    return main
 
 
 def build():
     reset_scene()
 
     fur = material("Fur", CREAM)
-    fur_shade = material("FurShade", SHADOW)
     dark = material("Dark", DARK, rough=0.35)
     tongue_mat = material("Tongue", TONGUE, rough=0.55)
     ear_mat = material("InnerEar", INNER_EAR, rough=0.7)
@@ -177,100 +204,99 @@ def build():
     root = bpy.data.objects.new("Samoyed", None)  # empty, sits between the feet
     bpy.context.collection.objects.link(root)
 
+    # Each part is built as rough overlapping blobs, then fused by skin() into
+    # a single surface. The blobs define the silhouette; the fur shader in the
+    # game supplies the hair itself, so nothing here tries to look hairy.
+
     # ---- torso -------------------------------------------------------------
-    body = shape("sphere", (0.62, 0.60, 1.05), (0, 0.64, 0.02), mat=fur, name="body")
-    parts = [
-        shape("sphere", (0.66, 0.62, 0.62), (0, 0.66, -0.34), mat=fur, name="chest"),
-        shape("sphere", (0.64, 0.62, 0.60), (0, 0.63, 0.38), mat=fur, name="rump"),
-        # The ruff: the thick collar of fur that makes the breed recognisable.
-        shape("sphere", (0.80, 0.76, 0.50), (0, 0.74, -0.50), mat=fur, name="ruff"),
-        shape("sphere", (0.70, 0.66, 0.34), (0, 0.76, -0.62), mat=fur_shade, name="ruff2"),
-        # Belly, a touch shaded so the silhouette reads from the side.
-        shape("sphere", (0.52, 0.34, 0.86), (0, 0.46, 0.04), mat=fur_shade, name="belly"),
-    ]
-    parts += tufts((0, 0.76, -0.56), 0.40, 16, 0.20, fur, None, "ruff_tuft", spread=0.26)
-    parts += tufts((0, 0.66, 0.42), 0.30, 10, 0.17, fur, None, "rump_tuft", spread=0.20)
-    body = join_into(body, parts)
-    body.name = "body"
+    body = skin("body", [
+        shape("sphere", (0.60, 0.58, 1.02), (0, 0.64, 0.02), name="torso"),
+        shape("sphere", (0.64, 0.60, 0.60), (0, 0.66, -0.32), name="chest"),
+        shape("sphere", (0.66, 0.64, 0.62), (0, 0.62, 0.36), name="rump"),
+        # The ruff: the thick collar the breed is known for. It is a shape, not
+        # a texture, so it has to be modelled a size larger than the neck.
+        shape("sphere", (0.84, 0.80, 0.52), (0, 0.76, -0.48), name="ruff"),
+        shape("sphere", (0.74, 0.70, 0.36), (0, 0.78, -0.62), name="ruff_front"),
+        shape("sphere", (0.54, 0.40, 0.84), (0, 0.48, 0.04), name="belly"),
+        # Shoulder and haunch mass, so the legs do not look pinned on.
+        shape("sphere", (0.50, 0.46, 0.44), (0, 0.56, -0.26), name="shoulders"),
+        shape("sphere", (0.56, 0.50, 0.48), (0, 0.54, 0.32), name="haunches"),
+    ], fur, BUDGET["body"])
     smooth(body)
 
     # ---- head (origin at the neck so it tilts as one piece) ----------------
     neck = (0, 0.94, -0.60)
-    head = shape("sphere", (0.46, 0.46, 0.46), (0, 0.98, -0.66), pivot=neck,
-                 mat=fur, name="head")
-    hp = [
-        shape("sphere", (0.34, 0.30, 0.34), (0, 0.90, -0.84), pivot=neck,
-              mat=fur, name="muzzle_base"),
-        shape("cone", (0.30, 0.30, 0.34), (0, 0.90, -0.90), pivot=neck,
-              mat=fur, name="muzzle", aim=(0, -0.15, -1)),
+    head = skin("head", [
+        shape("sphere", (0.46, 0.46, 0.46), (0, 0.99, -0.66), pivot=neck, name="skull"),
+        shape("sphere", (0.44, 0.38, 0.36), (0, 1.10, -0.62), pivot=neck, name="forehead"),
+        shape("sphere", (0.32, 0.29, 0.32), (0, 0.91, -0.83), pivot=neck, name="muzzle_base"),
+        shape("cone", (0.28, 0.28, 0.32), (0, 0.905, -0.90), pivot=neck,
+              name="muzzle", aim=(0, -0.12, -1)),
+        # Cheek ruffs -- the wide, soft jawline.
+        shape("sphere", (0.24, 0.24, 0.26), (-0.16, 0.96, -0.72), pivot=neck, name="cheek_l"),
+        shape("sphere", (0.24, 0.24, 0.26), (0.16, 0.96, -0.72), pivot=neck, name="cheek_r"),
+        # Pricked triangular ears, splayed slightly outward.
+        shape("cone", (0.21, 0.27, 0.14), (-0.165, 1.27, -0.60), pivot=neck,
+              name="ear_l", aim=(0.36 * -1, 1.0, -0.12)),
+        shape("cone", (0.21, 0.27, 0.14), (0.165, 1.27, -0.60), pivot=neck,
+              name="ear_r", aim=(0.36, 1.0, -0.12)),
+    ], fur, BUDGET["head"])
+
+    # Details go on AFTER the remesh, so they keep their own materials and do
+    # not get fused (and furred) into the face.
+    details = [
         shape("sphere", (0.145, 0.125, 0.12), (0, 0.905, -1.03), pivot=neck,
               mat=dark, name="nose"),
         # The upturned mouth line -- the "Samoyed smile".
-        shape("sphere", (0.20, 0.07, 0.16), (0, 0.825, -0.94), pivot=neck,
+        shape("sphere", (0.20, 0.07, 0.15), (0, 0.828, -0.945), pivot=neck,
               mat=tongue_mat, name="smile"),
-        shape("sphere", (0.42, 0.36, 0.34), (0, 1.10, -0.62), pivot=neck,
-              mat=fur, name="forehead"),
     ]
-    hp += tufts((0, 1.00, -0.48), 0.30, 12, 0.15, fur, neck, "cheek_tuft", spread=0.22)
     for s in (-1, 1):
-        hp += [
-            shape("sphere", (0.085, 0.10, 0.075), (0.135 * s, 1.02, -0.84),
+        details += [
+            shape("sphere", (0.085, 0.10, 0.075), (0.135 * s, 1.025, -0.845),
                   pivot=neck, mat=dark, name="eye"),
-            # Triangular pricked ears, slightly splayed.
-            shape("cone", (0.20, 0.26, 0.13), (0.165 * s, 1.28, -0.60),
-                  pivot=neck, mat=fur, name="ear",
-                  aim=(0.38 * s, 1.0, -0.12)),
-            shape("cone", (0.11, 0.16, 0.07), (0.163 * s, 1.26, -0.655),
+            shape("cone", (0.115, 0.17, 0.075), (0.163 * s, 1.255, -0.655),
                   pivot=neck, mat=ear_mat, name="ear_inner",
-                  aim=(0.38 * s, 1.0, -0.12)),
-            shape("sphere", (0.10, 0.09, 0.09), (0.10 * s, 0.94, -0.92),
-                  pivot=neck, mat=fur, name="cheek"),
+                  aim=(0.36 * s, 1.0, -0.12)),
         ]
-    head = join_into(head, hp)
+    head = join_into(head, details)
     head.name = "head"
     smooth(head)
 
-    # ---- tail: a fluffy plume curling up over the back ---------------------
+    # ---- tail: a plume curling up over the back ----------------------------
     base = (0, 0.84, 0.46)
-    tail = shape("sphere", (0.20, 0.20, 0.20), (0, 0.90, 0.48), pivot=base,
-                 mat=fur, name="tail")
-    tp = []
-    for i in range(1, 9):
+    segs = []
+    for i in range(9):
         t = i / 8.0
-        a = math.radians(20 + t * 150)  # sweep up, then forward over the spine
+        a = math.radians(20 + t * 150)
         r = 0.34
         p = (0.0,
              0.92 + math.sin(a) * r * 0.85,
              0.48 + (math.cos(a) - math.cos(math.radians(20))) * r)
-        k = 0.24 - t * 0.06
-        tp.append(shape("sphere", (k, k, k), p, pivot=base,
-                        mat=fur if i % 2 else fur_shade, name="tail_seg"))
-        tp += tufts(p, k * 0.62, 5, k * 0.52, fur, base, "tail_tuft", spread=0.14)
-    tail = join_into(tail, tp)
-    tail.name = "tail"
+        k = 0.25 - t * 0.05
+        segs.append(shape("sphere", (k, k, k), p, pivot=base, name="tail_seg"))
+    tail = skin("tail", segs, fur, BUDGET["tail"])
     smooth(tail)
 
     # ---- legs (origin at the hip/shoulder) ---------------------------------
     legs = []
-    for name, x, z, front in (("leg_front_L", -0.20, -0.30, True),
-                              ("leg_front_R", 0.20, -0.30, True),
-                              ("leg_back_L", -0.20, 0.34, False),
-                              ("leg_back_R", 0.20, 0.34, False)):
+    for name, x, z, back in (("leg_front_L", -0.20, -0.30, False),
+                             ("leg_front_R", 0.20, -0.30, False),
+                             ("leg_back_L", -0.20, 0.34, True),
+                             ("leg_back_R", 0.20, 0.34, True)):
         hip = (x, 0.44, z)
-        upper = shape("capsule", (0.21, 0.30, 0.21), (x, 0.30, z), pivot=hip,
-                      mat=fur, name=name, aim=(0, -1, 0))
-        lp = [
-            shape("capsule", (0.165, 0.24, 0.165), (x, 0.10, z), pivot=hip,
-                  mat=fur, name="shin", aim=(0, -1, 0)),
-            # Paw, flattened and pushed slightly forward.
-            shape("sphere", (0.22, 0.15, 0.27), (x, 0.005, z - 0.03), pivot=hip,
-                  mat=fur_shade, name="paw"),
+        blobs = [
+            # Trousered upper leg: heavier on the hind legs, as on the breed.
+            shape("sphere", (0.30 if back else 0.26, 0.34, 0.30 if back else 0.26),
+                  (x, 0.36, z), pivot=hip, name="thigh"),
+            shape("capsule", (0.19, 0.26, 0.19), (x, 0.22, z), pivot=hip,
+                  name="upper", aim=(0, -1, 0)),
+            shape("capsule", (0.155, 0.22, 0.155), (x, 0.09, z), pivot=hip,
+                  name="shin", aim=(0, -1, 0)),
+            shape("sphere", (0.21, 0.15, 0.26), (x, 0.01, z - 0.03), pivot=hip,
+                  name="paw"),
         ]
-        # Thicker feathering at the top of each leg, heavier on the haunches.
-        lp += tufts((x, 0.40, z), 0.16, 7, 0.15 if front else 0.19,
-                    fur, hip, "leg_tuft", spread=0.16)
-        leg = join_into(upper, lp)
-        leg.name = name
+        leg = skin(name, blobs, fur, BUDGET["leg"])
         smooth(leg)
         legs.append(leg)
 
@@ -305,4 +331,6 @@ if __name__ == "__main__":
     for p in parts:
         p.data.calc_loop_triangles()
     tris = export(root, parts)
+    for p in parts:
+        print(f"    {p.name:<14}{len(p.data.loop_triangles):>7,} tris")
     print(f"SAM: wrote {OUT}  ({tris:,} triangles)")

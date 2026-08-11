@@ -5,6 +5,7 @@ import { buildLevel } from './level.js';
 import { Player } from './player.js';
 import { FollowCamera } from './camera.js';
 import { loadSamoyed, createSamoyed } from './samoyed.js';
+import { Fur } from './fur.js';
 
 await RAPIER.init();
 
@@ -50,6 +51,7 @@ try {
 
 const input = new Input(renderer.domElement);
 const player = new Player(scene, RAPIER, world, dog);
+const fur = new Fur().apply(dog.root);
 const follow = new FollowCamera(camera, world, RAPIER);
 
 addEventListener('resize', () => {
@@ -61,6 +63,7 @@ addEventListener('resize', () => {
 const statsEl = document.getElementById('stats');
 let last = performance.now();
 let statsTimer = 0;
+const wind = new THREE.Vector3();
 
 function frame(now) {
   requestAnimationFrame(frame);
@@ -71,6 +74,14 @@ function frame(now) {
   const state = player.update(dt, input, follow.yaw);
   follow.update(dt, input, player.position);
   world.step();
+
+  // The coat trails behind the dog: push it opposite to travel, and let it
+  // lift a little as he rises through a jump.
+  wind.copy(player.velocity).multiplyScalar(-0.009);
+  wind.y = THREE.MathUtils.clamp(wind.y * 0.6, -0.05, 0.05);
+  scene.updateMatrixWorld();
+  fur.update(wind);
+
   renderer.render(scene, camera);
 
   statsTimer += dt;
