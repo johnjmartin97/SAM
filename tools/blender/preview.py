@@ -1,5 +1,9 @@
 """Render the model on a neutral studio setup, so it can be judged as a model.
 
+Kept from the sculpt attempt even though the sculpt itself was reverted: being
+able to look at the model on a grey background, away from a dark forest lit by
+one lamp, is worth having whatever the model is.
+
     npm run preview
 
 The game is a dark forest lit by one lamp -- the worst possible place to see
@@ -91,7 +95,7 @@ def render(view, yaw_deg, pitch_deg, distance):
 
 if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
-    make_samoyed.build()
+    make_samoyed.build_mesh()
     studio()
     for name, (yaw, pitch, dist) in VIEWS.items():
         render(name, yaw, pitch, dist)
