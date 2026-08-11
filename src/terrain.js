@@ -179,3 +179,42 @@ export function buildTerrainCollider(RAPIER, world, resolution = 160) {
 
   return collider;
 }
+
+/**
+ * Boulders standing in the channel.
+ *
+ * Deterministic and exported, because three separate systems need to agree on
+ * exactly where they are: the renderer draws them, the physics blocks them,
+ * and the water shader breaks white around them. Anything less than one shared
+ * list and the foam appears where there is no rock.
+ */
+function buildRiverRocks() {
+  const rocks = [];
+  let seed = 1337;
+  const rand = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  for (let i = 0; i < 34; i++) {
+    const x = -72 + (i / 33) * 144 + (rand() - 0.5) * 3.5;
+    const w = riverHalfWidth(x);
+    const z = riverZ(x) + (rand() - 0.5) * 2 * w * 0.8;
+    const depth = WATER_Y - heightAt(x, z);
+    // Only where there is water, and not so deep the rock would drown.
+    if (depth < 0.3 || depth > 2.1) continue;
+    rocks.push({
+      x,
+      z,
+      r: 0.55 + rand() * 1.45,
+      h: depth + 0.35 + rand() * 0.8, // stands proud of the surface
+    });
+  }
+  return rocks;
+}
+
+export const RIVER_ROCKS = buildRiverRocks();
+
+/** Flow speed as a 0..1 fraction, for foam and for sound. */
+export function flowSpeed(x, z) {
+  return Math.min(1, waterDepth(x, z) / 1.4);
+}

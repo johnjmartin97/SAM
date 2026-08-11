@@ -29,7 +29,7 @@ export const TUNING = {
   buoyDamping: 7.5, // without this he bobs like a cork forever
   floatDepth: 0.44, // how far below the surface the feet settle
   swimThreshold: 0.62, // submersion at which walking becomes swimming
-  currentStrength: 1.0, // multiplier on the river's own flow
+  currentStrength: 2.2, // multiplier on the river's own flow
   dryTime: 30, // seconds from soaked to dry, if he does not shake
 };
 

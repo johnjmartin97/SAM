@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import {
   WORLD,
   WATER_Y,
+  RIVER_ROCKS,
   heightAt,
   buildTerrainMesh,
   buildTerrainCollider,
 } from './terrain.js';
 import { buildForest, buildUndergrowth, buildThickets } from './trees.js';
 import { buildMaze } from './maze.js';
+import { buildBridge } from './bridge.js';
 import { stone } from './textures.js';
 
 // A dark pine forest with a river through it and a campsite somewhere beyond.
@@ -98,6 +100,7 @@ export class Woods {
 
     this._buildAtmosphere();
     this._buildGround();
+    this.bridge = buildBridge(this.scene, this.RAPIER, this.world);
     this._buildThickets();
     this._buildTrees();
     this._buildScatter();
@@ -197,7 +200,10 @@ export class Woods {
       if (heightAt(w.cx, w.cz) < WATER_Y + 0.3) return false;
       const nearSpawn = Math.hypot(w.cx - SPAWN.x, w.cz - SPAWN.z) < SPAWN_CLEARING;
       const nearCamp = Math.hypot(w.cx - CAMP.x, w.cz - CAMP.z) < CAMP_CLEARING;
-      return !nearSpawn && !nearCamp;
+      const nearBridge = this.bridge.ends.some(
+        (e) => Math.hypot(w.cx - e.x, w.cz - e.z) < 8
+      );
+      return !nearSpawn && !nearCamp && !nearBridge;
     });
     this.thickets = buildThickets(
       this.scene, this.RAPIER, this.world, walls, this.rand, heightAt
@@ -312,6 +318,54 @@ export class Woods {
     }
 
     this._buildBoulders();
+    this._buildRiverRocks();
+  }
+
+  /**
+   * The boulders standing in the channel. Same list the water shader breaks
+   * foam around, so what you see and what you swim into are the same rocks.
+   */
+  _buildRiverRocks() {
+    const geo = new THREE.IcosahedronGeometry(1, 1);
+    const hullSource = new THREE.IcosahedronGeometry(1, 0).attributes.position.array;
+    const rocks = new THREE.InstancedMesh(geo, this.stoneMaterial, RIVER_ROCKS.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+
+    RIVER_ROCKS.forEach((r, i) => {
+      const sx = r.r;
+      const sy = r.h * 0.85;
+      const sz = r.r * (0.8 + this.rand() * 0.5);
+      q.setFromEuler(new THREE.Euler(
+        (this.rand() - 0.5) * 0.5,
+        this.rand() * Math.PI * 2,
+        (this.rand() - 0.5) * 0.5
+      ));
+      // Bedded into the riverbed, breaking the surface.
+      const y = heightAt(r.x, r.z) + sy * 0.75;
+      m.compose(new THREE.Vector3(r.x, y, r.z), q, new THREE.Vector3(sx, sy, sz));
+      rocks.setMatrixAt(i, m);
+
+      const hull = new Float32Array(hullSource.length);
+      for (let v = 0; v < hullSource.length; v += 3) {
+        hull[v] = hullSource[v] * sx;
+        hull[v + 1] = hullSource[v + 1] * sy;
+        hull[v + 2] = hullSource[v + 2] * sz;
+      }
+      const desc = this.RAPIER.ColliderDesc.convexHull(hull);
+      if (!desc) return;
+      const body = this.world.createRigidBody(
+        this.RAPIER.RigidBodyDesc.fixed()
+          .setTranslation(r.x, y, r.z)
+          .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
+      );
+      this.world.createCollider(desc, body);
+    });
+
+    rocks.instanceMatrix.needsUpdate = true;
+    rocks.castShadow = true;
+    rocks.receiveShadow = true;
+    this.scene.add(rocks);
   }
 
   /**
@@ -588,6 +642,7 @@ export class Woods {
   update(dt, playerPos) {
     this.time += dt;
     const t = this.time;
+    this.bridge.update(dt, t);
 
     // Fire flicker: two out-of-step sine waves plus noise reads as a live
     // flame; a single sine reads as a pulsing bulb.
