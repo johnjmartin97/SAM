@@ -11,9 +11,14 @@ import * as THREE from 'three';
 const ShaftShader = {
   vertexShader: /* glsl */ `
     varying vec3 vLocal;
+    varying vec3 vNormalW;
+    varying vec3 vViewW;
     void main() {
       vLocal = position;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vNormalW = normalize(mat3(modelMatrix) * normal);
+      vViewW = normalize(cameraPosition - wp.xyz);
+      gl_Position = projectionMatrix * viewMatrix * wp;
     }`,
   fragmentShader: /* glsl */ `
     uniform vec3 uColor;
@@ -21,6 +26,8 @@ const ShaftShader = {
     uniform float uRadius;
     uniform float uIntensity;
     varying vec3 vLocal;
+    varying vec3 vNormalW;
+    varying vec3 vViewW;
 
     void main() {
       // 0 on the axis, 1 at the rim.
@@ -31,6 +38,14 @@ const ShaftShader = {
       // Bright and tight near the source, wide and faint by the ground --
       // which is what a beam in mist actually does.
       float a = pow(1.0 - r, 2.6) * pow(1.0 - h, 1.4);
+
+      // Without this the cone reads as a solid triangle, because what is being
+      // shaded is a SURFACE, and a surface has a hard silhouette. Fading by
+      // how squarely the surface faces the camera softens that edge to
+      // nothing, which is what makes it look like lit air instead of a cone.
+      float facing = abs(dot(normalize(vNormalW), normalize(vViewW)));
+      a *= pow(facing, 1.7);
+
       a *= uIntensity;
       gl_FragColor = vec4(uColor * a, a);
     }`,

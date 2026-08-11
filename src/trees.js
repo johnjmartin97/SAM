@@ -301,6 +301,11 @@ export function buildForest(scene, RAPIER, world, spots, rand) {
         side: THREE.DoubleSide,
         roughness: rough,
         metalness: 0,
+        // A leaf is thin enough to pass light. Standing in for real
+        // translucency: foliage never goes fully black, which is what stops
+        // the canopy reading as a flat cut-out against the sky.
+        emissive: new THREE.Color(0x16240e),
+        emissiveIntensity: 1,
       }),
       1
     );

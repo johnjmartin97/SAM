@@ -137,9 +137,14 @@ export class Woods {
     // The ground colour matters as much as the intensity: with a lamp directly
     // overhead this is the only light reaching anything's underside, and at
     // near-black it left Sam's legs looking like they had been cut off.
-    const moon = new THREE.HemisphereLight(0x2c3d5c, 0x232a33, 0.7);
+    // The GROUND colour is the only light reaching the underside of anything,
+    // and light bouncing off a forest floor of needles and earth is WARM. A
+    // cold blue bounce was why Sam's belly and legs kept reading as navy.
+    const moon = new THREE.HemisphereLight(0x35507a, 0x3a2e1d, 0.95);
     this.scene.add(moon);
-    const moonDir = new THREE.DirectionalLight(0x8fa8d8, 0.14);
+    // Just enough moonlight to silhouette a trunk against the dark, so the
+    // forest has depth beyond the lamp instead of ending in a black wall.
+    const moonDir = new THREE.DirectionalLight(0x8fa8d8, 0.32);
     moonDir.position.set(-30, 40, 20);
     this.scene.add(moonDir);
   }

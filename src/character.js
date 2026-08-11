@@ -33,20 +33,31 @@ function patchMaterial(material, uniforms) {
 
     shader.uniforms.uCharExposure = uniforms.exposure;
     shader.uniforms.uCharKnee = uniforms.knee;
+    shader.uniforms.uCharFill = uniforms.fill;
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
          uniform float uCharExposure;
-         uniform float uCharKnee;`
+         uniform float uCharKnee;
+         uniform vec3 uCharFill;`
       )
       .replace(
         '#include <opaque_fragment>',
         `#include <opaque_fragment>
          gl_FragColor.rgb *= uCharExposure;
          // Soft shoulder: values roll off toward a ceiling instead of clipping.
-         gl_FragColor.rgb = gl_FragColor.rgb / (1.0 + gl_FragColor.rgb * uCharKnee);`
+         gl_FragColor.rgb = gl_FragColor.rgb / (1.0 + gl_FragColor.rgb * uCharKnee);
+         {
+           // A warm floor on his shadow side, applied to HIM and nothing else.
+           // Flooding the scene with enough bounce light to warm a white dog
+           // destroys the darkness the whole stage depends on; three.js has no
+           // way to light one object, so it is done here instead. Without it
+           // his underside reads as navy against the warm ground.
+           float l = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+           gl_FragColor.rgb += uCharFill * (1.0 - smoothstep(0.0, 0.35, l));
+         }`
       );
   };
 
@@ -64,10 +75,13 @@ function patchMaterial(material, uniforms) {
  * Give everything under `root` its own exposure.
  * Call AFTER the fur is applied, so the fur shells are patched too.
  */
-export function applyCharacterExposure(root, { exposure = 1.0, knee = 1.15 } = {}) {
+export function applyCharacterExposure(root, {
+  exposure = 1.0, knee = 1.15, fill = new THREE.Color(0.085, 0.062, 0.038),
+} = {}) {
   const uniforms = {
     exposure: { value: exposure },
     knee: { value: knee },
+    fill: { value: fill },
   };
 
   root.traverse((o) => {
@@ -88,6 +102,9 @@ export function applyCharacterExposure(root, { exposure = 1.0, knee = 1.15 } = {
     },
     set knee(v) {
       uniforms.knee.value = v;
+    },
+    get fill() {
+      return uniforms.fill.value;
     },
   };
 }
