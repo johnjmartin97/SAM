@@ -14,29 +14,8 @@ import * as THREE from 'three';
 // that actually follows the bones.
 
 const SHELLS = 16;
-const LENGTH = 0.105; // metres, on the body -- the longest it ever gets
+const LENGTH = 0.105; // metres, at the longest
 const DENSITY = 105;
-
-// Fur length varies over the animal, and getting this wrong buries the face.
-// A Samoyed is short-coated on the muzzle and skull and heavily coated
-// everywhere else; ten centimetres of fur over the whole dog grows straight
-// over his nose, eyes and ears, which is exactly what happened when this was
-// one constant.
-//
-// Written against model-space position, which is the bind pose: the muzzle is
-// around z = -1.0, the skull -0.7, the ruff -0.35, the tail +0.5.
-const REGION_GLSL = /* glsl */ `
-  float furLengthAt(vec3 p) {
-    // 0 on the muzzle, 1 behind the skull where the ruff begins.
-    float back = smoothstep(-0.86, -0.52, p.z);
-    float len = mix(0.010, ${LENGTH.toFixed(3)}, back);
-    // The ears stand above everything else and must stay nearly bare, or the
-    // pink inside them never shows.
-    float low = smoothstep(1.30, 1.10, p.y);
-    len *= mix(0.22, 1.0, low);
-    return len;
-  }
-`;
 
 const COMMON = /* glsl */ `
   // Cheap 3D hash. Same cell -> same value, every frame and every shell, which
@@ -108,8 +87,7 @@ export class Fur {
            uniform float uWet;
            uniform vec3 uDown;
            uniform vec3 uWind;
-           varying vec3 vFurPos;
-           ${REGION_GLSL}`
+           varying vec3 vFurPos;`
         )
         // AFTER skinning, so the offset follows the deformed surface rather
         // than the bind pose. Putting it in begin_vertex would leave the coat
@@ -122,10 +100,9 @@ export class Fur {
              float bend = uShell * uShell;
              float wetLen = mix(1.0, 0.42, uWet);
              float wetDroop = mix(1.0, 1.9, uWet);
-             float len = furLengthAt(position);
              vec3 n = normalize(objectNormal);
-             transformed += n * (len * uShell * wetLen)
-                          + uDown * (len * 0.42 * bend * wetDroop)
+             transformed += n * (${LENGTH.toFixed(3)} * uShell * wetLen)
+                          + uDown * (${(LENGTH * 0.42).toFixed(3)} * bend * wetDroop)
                           + uWind * bend;
            }`
         );
