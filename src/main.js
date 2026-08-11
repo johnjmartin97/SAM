@@ -9,6 +9,7 @@ import { Woods, SPAWN, CAMP, radialTexture } from './woods.js';
 import { Water } from './water.js';
 import { Droplets, Ripples } from './effects.js';
 import { updateWind } from './trees.js';
+import { applyCharacterExposure } from './character.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -58,6 +59,12 @@ try {
 const input = new Input(renderer.domElement);
 const player = new Player(scene, RAPIER, world, dog, { spawn: SPAWN, killY: -20 });
 const fur = new Fur().apply(dog.root);
+
+// Sam gets his own exposure. A white dog and a dark forest floor are about
+// seven times apart in albedo, so one lamp cannot expose both: he has to be
+// turned down at his own materials. Must run after the fur, so the fur shells
+// are covered too.
+const samExposure = applyCharacterExposure(dog.root, { exposure: 0.07, knee: 0.55 });
 const follow = new FollowCamera(camera, world, RAPIER);
 follow.distance = 5.5; // pulled in: the forest is tight and the fog is close
 
@@ -215,5 +222,9 @@ function frame(now) {
 requestAnimationFrame(frame);
 
 // Exposed so the look can be tuned live from the console, e.g.
+//   SAM.exposure.exposure = 0.04;  // how brightly Sam responds to light
 //   SAM.bloom.threshold = 1.4;  SAM.lamp.intensity = 60;
-window.SAM = { player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur };
+window.SAM = {
+  player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur,
+  exposure: samExposure,
+};
