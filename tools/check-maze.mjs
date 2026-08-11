@@ -10,11 +10,12 @@
  */
 import { buildMaze, CELL } from '../src/maze.js';
 import { WORLD, heightAt, WATER_Y } from '../src/terrain.js';
-import { MAZE_SEED, MAZE_OPTIONS, SPAWN, CAMP } from '../src/woods.js';
+import { MAZE_SEED, MAZE_OPTIONS, MAZE_OPEN_AT, SPAWN, CAMP } from '../src/woods.js';
+import { bridgeEnds } from '../src/bridge.js';
 
 const maze = buildMaze(WORLD, MAZE_SEED, {
   ...MAZE_OPTIONS,
-  openAt: [SPAWN, CAMP],
+  openAt: MAZE_OPEN_AT,
 });
 
 let failures = 0;
@@ -50,7 +51,37 @@ if (!path) {
   }
 }
 
-// ---- 2. do the walls leave the river crossable? ----------------------------
+// ---- 2. can the bridge be reached, and used? -------------------------------
+// The dry route is only a real choice if the maze actually lets you walk to
+// it. Clearing a circle around the ends is not enough -- a wall further out
+// can seal the corridor leading there, which is invisible until someone walks
+// twenty metres out of their way and hits a hedge.
+const [northEnd, southEnd] = bridgeEnds();
+const toBridge = maze.solve(SPAWN, southEnd);
+const fromBridge = maze.solve(northEnd, CAMP);
+
+if (!toBridge) {
+  console.log('  BAD: the bridge cannot be reached from the spawn');
+  failures++;
+} else if (!fromBridge) {
+  console.log('  BAD: the campsite cannot be reached from the far side of the bridge');
+  failures++;
+} else {
+  const dry = (toBridge.length - 1 + fromBridge.length - 1) * CELL;
+  const straight = Math.hypot(SPAWN.x - CAMP.x, SPAWN.z - CAMP.z);
+  console.log(`  dry route      : ${dry.toFixed(0)} m over the bridge`);
+  console.log(`  vs straight    : +${(dry - straight).toFixed(0)} m detour to stay dry`);
+  // Note: the maze graph models WALKING only. It does not know Sam can swim,
+  // and it still contains the walls that are skipped where they stand in
+  // water -- so it cannot measure the wet route, and no comparison against
+  // one is made here. What it can prove is that the dry option exists.
+  if (dry < straight) {
+    console.log('  BAD: the bridge is not a detour at all');
+    failures++;
+  }
+}
+
+// ---- 3. do the walls leave the river crossable? ----------------------------
 // Walls sitting in water are skipped by the level, so the river stays open.
 // If nearly every wall were skipped the maze would fall apart, so count them.
 const walls = maze.walls();
@@ -61,7 +92,7 @@ if (drowned / walls.length > 0.25) {
   failures++;
 }
 
-// ---- 3. is there a clear tube down every corridor? -------------------------
+// ---- 4. is there a clear tube down every corridor? -------------------------
 // Object placement rejects anything within CLEARANCE of a corridor centreline.
 // Confirm that leaves a gap Sam actually fits through (he is 0.6 m wide).
 const CLEARANCE = MAZE_OPTIONS.clearance ?? 1.6;

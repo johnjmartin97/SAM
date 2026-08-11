@@ -10,7 +10,7 @@ import {
 } from './terrain.js';
 import { buildForest, buildUndergrowth, buildThickets } from './trees.js';
 import { buildMaze } from './maze.js';
-import { buildBridge } from './bridge.js';
+import { buildBridge, bridgeEnds } from './bridge.js';
 import { stone } from './textures.js';
 
 // A dark pine forest with a river through it and a campsite somewhere beyond.
@@ -39,6 +39,11 @@ const CAMP_CLEARING = 11;
 // The maze. Exported so tools/check-maze.mjs can build an identical one and
 // prove the campsite is reachable before anyone plays the stage.
 export const MAZE_SEED = 90210;
+
+// Everywhere the maze must leave open. The bridge belongs here: clearing a
+// circle around its ends is not enough, because a wall further out can still
+// seal the whole corridor leading to it. The maze has to know it exists.
+export const MAZE_OPEN_AT = [SPAWN, CAMP, ...bridgeEnds()];
 export const MAZE_OPTIONS = {
   braid: 0.12,      // how many walls get knocked back out: higher = more open
   clearings: 6,     // landmark cells, opened on every side
@@ -55,6 +60,16 @@ function rng(seed) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/** Distance from a point to a line segment. */
+function segmentDistance(px, pz, x1, z1, x2, z2) {
+  const dx = x2 - x1;
+  const dz = z2 - z1;
+  const lenSq = dx * dx + dz * dz;
+  let t = lenSq > 0 ? ((px - x1) * dx + (pz - z1) * dz) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
 }
 
 function standard(color, opts = {}) {
@@ -96,7 +111,7 @@ export class Woods {
 
     this.maze = buildMaze(WORLD, MAZE_SEED, {
       ...MAZE_OPTIONS,
-      openAt: [SPAWN, CAMP],
+      openAt: MAZE_OPEN_AT,
     });
 
     this._buildAtmosphere();
@@ -194,6 +209,17 @@ export class Woods {
     return points;
   }
 
+  /**
+   * Keep-clear zones at both ends of the bridge.
+   *
+   * Every scatter that produces a collider has to use these. Missing one is
+   * enough to wall the bridge off, which is exactly what happened: bushes and
+   * boulders had no exclusion at all.
+   */
+  _bridgeClearings(radius = 8) {
+    return bridgeEnds().map((e) => [e.x, e.z, radius]);
+  }
+
   _buildThickets() {
     // Walls standing in the river are skipped, so the water stays a route --
     // a fast, wet shortcut with a current that pushes you off course.
@@ -201,8 +227,8 @@ export class Woods {
       if (heightAt(w.cx, w.cz) < WATER_Y + 0.3) return false;
       const nearSpawn = Math.hypot(w.cx - SPAWN.x, w.cz - SPAWN.z) < SPAWN_CLEARING;
       const nearCamp = Math.hypot(w.cx - CAMP.x, w.cz - CAMP.z) < CAMP_CLEARING;
-      const nearBridge = this.bridge.ends.some(
-        (e) => Math.hypot(w.cx - e.x, w.cz - e.z) < 8
+      const nearBridge = bridgeEnds().some(
+        (e) => segmentDistance(e.x, e.z, w.x1, w.z1, w.x2, w.z2) < 11
       );
       return !nearSpawn && !nearCamp && !nearBridge;
     });
@@ -215,6 +241,7 @@ export class Woods {
     const spots = this._scatter(TREE_COUNT, 2.6, [
       [SPAWN.x, SPAWN.z, SPAWN_CLEARING],
       [CAMP.x, CAMP.z, CAMP_CLEARING],
+      ...this._bridgeClearings(),
     ]);
     this.forest = buildForest(this.scene, this.RAPIER, this.world, spots, this.rand);
     this._buildUndergrowth();
@@ -227,6 +254,7 @@ export class Woods {
     const bushes = this._scatter(BUSH_COUNT, 2.4, [
       [SPAWN.x, SPAWN.z, SPAWN_CLEARING * 0.7],
       [CAMP.x, CAMP.z, CAMP_CLEARING * 0.8],
+      ...this._bridgeClearings(),
     ], 0.45);
     buildUndergrowth(this.scene, this.RAPIER, this.world, bushes, this.rand,
       { collide: true });
@@ -241,6 +269,7 @@ export class Woods {
     const spots = this._scatter(LOG_COUNT, 9, [
       [SPAWN.x, SPAWN.z, SPAWN_CLEARING],
       [CAMP.x, CAMP.z, CAMP_CLEARING],
+      ...this._bridgeClearings(),
     ], 0.5);
 
     const geo = new THREE.CylinderGeometry(0.36, 0.44, 1, 8);
@@ -378,6 +407,7 @@ export class Woods {
     const spots = this._scatter(BOULDER_COUNT, 7, [
       [SPAWN.x, SPAWN.z, SPAWN_CLEARING * 0.6],
       [CAMP.x, CAMP.z, CAMP_CLEARING * 0.7],
+      ...this._bridgeClearings(9),
     ], -1.4); // allowed to sit in the river, breaking up the current
 
     // Subdivided once so the bumps read as rock rather than a d20.

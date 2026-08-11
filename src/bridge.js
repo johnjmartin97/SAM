@@ -12,11 +12,27 @@ import { bark } from './textures.js';
 // A lantern hangs at each end. Without them the bridge would be invisible at
 // fourteen metres of visibility, and an option you cannot find is not a choice.
 
-export const BRIDGE_X = 31; // well east of the direct route
+export const BRIDGE_X = 44; // well east of the direct route, so it costs a detour
 export const SPAN = 31; // long enough to clear the channel and both banks
 const WIDTH = 2.6;
 const RISE = 3.1; // how high the arch lifts above its ends
 const PLANKS = 46;
+
+/**
+ * Where the bridge lands, computed without building it.
+ *
+ * The maze and every scatter pass need these BEFORE the bridge exists, so that
+ * nothing is placed across the approaches and the maze carves a route to them.
+ */
+export function bridgeEnds() {
+  const centre = riverZ(BRIDGE_X);
+  const z0 = centre - SPAN / 2;
+  const z1 = centre + SPAN / 2;
+  return [
+    new THREE.Vector3(BRIDGE_X, heightAt(BRIDGE_X, z0), z0),
+    new THREE.Vector3(BRIDGE_X, heightAt(BRIDGE_X, z1), z1),
+  ];
+}
 
 /** Where the deck surface is, for t along the span (0..1). */
 function deckPoint(t, z0, z1, y0, y1) {
