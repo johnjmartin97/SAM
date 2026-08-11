@@ -87,10 +87,12 @@ export function buildTerrainMesh(segments = 168) {
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
 
-  const grass = new THREE.Color(0x1b2716);
-  const moss = new THREE.Color(0x24351b);
-  const mud = new THREE.Color(0x2e2519);
-  const silt = new THREE.Color(0x3a3527);
+  // Tints, not colours: these MULTIPLY the forest-floor texture, which is
+  // already dark. Absolute dark values here take the ground to near black.
+  const grass = new THREE.Color(0.95, 1.05, 0.85);
+  const moss = new THREE.Color(0.8, 1.1, 0.7);
+  const mud = new THREE.Color(1.15, 0.95, 0.75);
+  const silt = new THREE.Color(1.05, 1.0, 0.85);
   const c = new THREE.Color();
 
   for (let i = 0; i < pos.count; i++) {

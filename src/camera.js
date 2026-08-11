@@ -15,6 +15,9 @@ export class FollowCamera {
     this.smoothed = new THREE.Vector3(0, 2, 0);
     this._target = new THREE.Vector3();
     this._desired = new THREE.Vector3();
+    this._dist = this.distance; // eased, so the camera never snaps
+    this._probe = new RAPIER.Ball(0.35);
+    this._identity = { x: 0, y: 0, z: 0, w: 1 };
   }
 
   update(dt, input, playerPos) {
@@ -37,13 +40,23 @@ export class FollowCamera {
       Math.cos(this.yaw) * cp
     );
 
-    // Keep the camera out of geometry: cast toward where it wants to sit.
-    let dist = this.distance;
-    const ray = new this.RAPIER.Ray(this.smoothed, dir);
-    const hit = this.world.castRay(ray, this.distance, true);
-    if (hit) dist = Math.max(1.4, hit.timeOfImpact - 0.25);
+    // Keep the camera out of geometry. A single ray misses anything the
+    // camera's own bulk would clip, so sweep a small sphere instead -- the
+    // camera has width, and a ray does not.
+    let wanted = this.distance;
+    const hit = this.world.castShape(
+      this.smoothed, this._identity, dir, this._probe,
+      0, this.distance, true
+    );
+    if (hit) wanted = Math.max(1.4, hit.time_of_impact - 0.1);
 
-    this._desired.copy(this.smoothed).addScaledVector(dir, dist);
+    // Ease toward it. Pulling in fast is fine -- being inside a tree is worse
+    // than a quick move -- but easing back out stops the camera lurching every
+    // time a trunk passes behind Sam.
+    const rate = wanted < this._dist ? 26 : 5;
+    this._dist += (wanted - this._dist) * (1 - Math.exp(-rate * dt));
+
+    this._desired.copy(this.smoothed).addScaledVector(dir, this._dist);
     this.camera.position.copy(this._desired);
     this.camera.lookAt(this.smoothed);
   }
