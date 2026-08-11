@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { animateSamoyed } from './samoyed.js';
-import { SPAWN, KILL_Y } from './level.js';
 
 // Tuning lives in one place. These numbers are the "feel" of the game.
 export const TUNING = {
@@ -23,18 +22,20 @@ export const TUNING = {
 const FEET_OFFSET = TUNING.capsuleRadius + TUNING.capsuleHalfHeight;
 
 export class Player {
-  constructor(scene, RAPIER, world, dog) {
+  constructor(scene, RAPIER, world, dog, { spawn, killY = -12 } = {}) {
     this.RAPIER = RAPIER;
     this.world = world;
+    this.spawn = spawn ? spawn.clone() : new THREE.Vector3(0, 1.2, 0);
+    this.killY = killY;
 
     this.dog = dog;
     scene.add(this.dog.root);
 
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
-        SPAWN.x,
-        SPAWN.y + FEET_OFFSET,
-        SPAWN.z
+        this.spawn.x,
+        this.spawn.y + FEET_OFFSET,
+        this.spawn.z
       )
     );
     this.collider = world.createCollider(
@@ -66,7 +67,8 @@ export class Player {
   }
 
   respawn() {
-    this.body.setTranslation({ x: SPAWN.x, y: SPAWN.y + FEET_OFFSET, z: SPAWN.z }, true);
+    const s = this.spawn;
+    this.body.setTranslation({ x: s.x, y: s.y + FEET_OFFSET, z: s.z }, true);
     this.velocity.set(0, 0, 0);
   }
 
@@ -159,7 +161,7 @@ export class Player {
       dt,
     });
 
-    if (p.y < KILL_Y) this.respawn();
+    if (p.y < this.killY) this.respawn();
 
     return { speed: planarSpeed, grounded: this.grounded };
   }
