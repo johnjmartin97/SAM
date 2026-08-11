@@ -12,10 +12,8 @@ import { Ambience } from './audio.js';
 import { Wildlife, loadAnimals } from './wildlife.js';
 import { updateWind } from './trees.js';
 import { applyCharacterExposure } from './character.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { buildComposer } from './postfx.js';
+import { createLightShaft } from './lightshaft.js';
 
 await RAPIER.init();
 
@@ -90,8 +88,19 @@ follow.ignoreCollider = player.collider; // or every cast hits Sam himself
 // falloff keeps the pool on the ground while leaving the dog merely lit.
 const LAMP_HEIGHT = 2.4;
 const lamp = new THREE.PointLight(0xffe9c9, 40, 18, 1.35);
-lamp.castShadow = false; // a second shadow-casting point light is not worth it
+lamp.castShadow = true;
+lamp.shadow.mapSize.set(2048, 2048);
+lamp.shadow.camera.near = 0.5;
+lamp.shadow.camera.far = 22;
+lamp.shadow.bias = -0.0015;
+lamp.shadow.normalBias = 0.08;
 scene.add(lamp);
+
+// The lamp's beam, hanging in the fog beneath it.
+const lampShaft = createLightShaft({
+  color: 0xffdcae, height: LAMP_HEIGHT + 0.7, radius: 2.4, intensity: 0.42,
+});
+scene.add(lampShaft);
 
 // A soft dark patch under Sam, standing in for a real shadow from that lamp.
 const contact = new THREE.Mesh(
@@ -105,29 +114,15 @@ const contact = new THREE.Mesh(
 contact.rotation.x = -Math.PI / 2;
 scene.add(contact);
 
-// Bloom. In a night scene lit by one lamp and one fire, letting the bright
-// things bleed into the dark does more for realism than any extra geometry --
-// it is how a camera and an eye both actually behave.
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-// Bloom runs before tone mapping, so it sees raw linear light values that go
-// well above 1. The threshold has to be set in those terms, not in 0-1 screen
-// terms, or ordinary lit surfaces start glowing.
-const bloom = new UnrealBloomPass(
-  new THREE.Vector2(innerWidth, innerHeight),
-  0.5, // strength
-  0.7, // radius
-  1.15 // threshold: the flames and lantern, not anything merely well lit
-);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
+// Contact shading, bloom, lens and grain. See src/postfx.js.
+const fx = buildComposer(renderer, scene, camera);
+const bloom = fx.bloom;
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
-  bloom.setSize(innerWidth, innerHeight);
+  fx.setSize(innerWidth, innerHeight);
 });
 
 // ----------------------------------------------------------------- stage ---
@@ -174,6 +169,7 @@ function frame(now) {
   world.step();
 
   lamp.position.set(pos.x, pos.y + LAMP_HEIGHT, pos.z);
+  lampShaft.position.copy(lamp.position);
   contact.position.set(pos.x, pos.y + 0.02, pos.z);
   contact.visible = state.grounded && state.submersion < 0.15;
 
@@ -234,7 +230,8 @@ function frame(now) {
   scene.updateMatrixWorld();
   fur.update(wind);
 
-  composer.render();
+  fx.update(dt);
+  fx.composer.render();
 
   statsTimer += dt;
   if (statsTimer > 0.15) {
@@ -253,7 +250,7 @@ requestAnimationFrame(frame);
 //   SAM.exposure.exposure = 0.04;  // how brightly Sam responds to light
 //   SAM.bloom.threshold = 1.4;  SAM.lamp.intensity = 60;
 window.SAM = {
-  player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur, ambience,
+  player, follow, woods, scene, world, CAMP, lamp, bloom, water, fur, ambience, fx,
   wildlife,
   exposure: samExposure,
 };

@@ -49,7 +49,9 @@ export async function loadSamoyed(url = '/models/samoyed.glb') {
   root.traverse((o) => {
     if (o.isMesh) {
       o.castShadow = true;
-      o.receiveShadow = true;
+      // See the note in fur.js: self-shadowing under his own lamp is all
+      // artifact, so he casts but does not receive.
+      o.receiveShadow = false;
     }
   });
 
@@ -144,10 +146,12 @@ export function createSamoyed() {
 // a tucked pose in the air. Keeps the prototype readable without a rig.
 export function animateSamoyed(
   dog,
-  { speed, grounded, time, dt, swimming = false, shake = 0 }
+  { speed, grounded, time, dt, gaitPhase = null, swimming = false, shake = 0 }
 ) {
   const gait = Math.min(speed / 6, 1);
-  const cycle = time * (6 + gait * 8);
+  // Driven by distance travelled when it is available, so the paws stay
+  // planted on the ground instead of skating over it.
+  const cycle = gaitPhase !== null ? gaitPhase : time * (6 + gait * 8);
   const swing = gait * 0.85;
 
   if (swimming) {

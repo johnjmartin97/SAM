@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import * as TEX from './textures.js';
+import { SOFT_GROUPS } from './collision.js';
 
 // The forest.
 //
@@ -445,7 +446,11 @@ export function buildForest(scene, RAPIER, world, spots, rand) {
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.castShadow = cast;
-    im.receiveShadow = true;
+    // Alpha-cut cards are one polygon thick and double sided. Under a close
+    // point light the depth comparison has nothing sensible to compare, and
+    // the result is hard black blotches crawling over every leaf. Foliage is
+    // lit directly and not shadowed.
+    im.receiveShadow = cast;
     // Wind moves vertices outside their original bounds.
     im.frustumCulled = false;
     scene.add(im);
@@ -481,18 +486,22 @@ export function buildForest(scene, RAPIER, world, spots, rand) {
 
 /* ------------------------------------------------------------ colliders -- */
 
-function addCylinder(RAPIER, world, x, y, z, halfHeight, radius) {
+function addCylinder(RAPIER, world, x, y, z, halfHeight, radius, soft = false) {
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z)
   );
-  world.createCollider(RAPIER.ColliderDesc.cylinder(halfHeight, radius), body);
+  const desc = RAPIER.ColliderDesc.cylinder(halfHeight, radius);
+  if (soft) desc.setCollisionGroups(SOFT_GROUPS);
+  world.createCollider(desc, body);
 }
 
-function addBall(RAPIER, world, x, y, z, radius) {
+function addBall(RAPIER, world, x, y, z, radius, soft = false) {
   const body = world.createRigidBody(
     RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z)
   );
-  world.createCollider(RAPIER.ColliderDesc.ball(radius), body);
+  const desc = RAPIER.ColliderDesc.ball(radius);
+  if (soft) desc.setCollisionGroups(SOFT_GROUPS);
+  world.createCollider(desc, body);
 }
 
 /**
@@ -510,15 +519,9 @@ function addFoliageCollider(RAPIER, world, sp, spot, height, girth, c) {
 
   if (c.shape === 'cone') {
     // Rapier cones point +Y, which is exactly a conifer crown.
-    const body = world.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(spot.x, mid, spot.z)
-    );
-    world.createCollider(
-      RAPIER.ColliderDesc.cone((top - bottom) * 0.5, maxR * 0.85),
-      body
-    );
+    addBall(RAPIER, world, spot.x, mid, spot.z, maxR * 0.7, true);
   } else {
-    addBall(RAPIER, world, spot.x, mid, spot.z, maxR * 0.8);
+    addBall(RAPIER, world, spot.x, mid, spot.z, maxR * 0.8, true);
   }
 }
 
@@ -562,7 +565,7 @@ export function buildUndergrowth(scene, RAPIER, world, spots, rand, { collide = 
     }
 
     if (collide) {
-      addBall(RAPIER, world, spot.x, spot.y + size * 0.35, spot.z, size * 0.45);
+      addBall(RAPIER, world, spot.x, spot.y + size * 0.35, spot.z, size * 0.45, true);
     }
   }
 
@@ -575,7 +578,7 @@ export function buildUndergrowth(scene, RAPIER, world, spots, rand, { collide = 
   im.instanceMatrix.needsUpdate = true;
   if (im.instanceColor) im.instanceColor.needsUpdate = true;
   im.castShadow = false;
-  im.receiveShadow = true;
+  im.receiveShadow = false; // see the note in _multimesh
   im.frustumCulled = false;
   scene.add(im);
   return im;
@@ -628,14 +631,12 @@ export function buildThickets(scene, RAPIER, world, walls, rand, heightAt) {
     const body = world.createRigidBody(
       RAPIER.RigidBodyDesc.fixed().setTranslation(w.cx, heightAt(w.cx, w.cz) + 1.1, w.cz)
     );
-    world.createCollider(
-      RAPIER.ColliderDesc.cuboid(
-        alongX ? len / 2 : HALF_THICK,
-        1.5,
-        alongX ? HALF_THICK : len / 2
-      ),
-      body
-    );
+    const wallDesc = RAPIER.ColliderDesc.cuboid(
+      alongX ? len / 2 : HALF_THICK,
+      1.5,
+      alongX ? HALF_THICK : len / 2
+    ).setCollisionGroups(SOFT_GROUPS);
+    world.createCollider(wallDesc, body);
 
     // --- the planting that explains it ---
     const clumps = 7;
@@ -700,7 +701,7 @@ export function buildThickets(scene, RAPIER, world, walls, rand, heightAt) {
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
     im.castShadow = false;
-    im.receiveShadow = true;
+    im.receiveShadow = false; // see the note in _multimesh
     im.frustumCulled = false;
     scene.add(im);
     return im;

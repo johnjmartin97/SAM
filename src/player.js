@@ -71,6 +71,7 @@ export class Player {
     this.timeSinceGrounded = 99;
     this.timeSinceJumpPress = 99;
     this.facing = Math.PI;
+    this.gaitPhase = 0;
     this.time = 0;
     this.wasJumpDown = false;
 
@@ -213,6 +214,10 @@ export class Player {
 
     // ---------------------------------------------------------- facing ---
     const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
+    // Advance the walk cycle by DISTANCE, not by time. A clock-driven gait
+    // means the paws move at one speed while the ground moves at another, and
+    // the whole animal looks like it is skating.
+    if (this.grounded) this.gaitPhase += planarSpeed * dt * 6.4;
     if (planarSpeed > 0.35) {
       const want = Math.atan2(this.velocity.x, this.velocity.z);
       let delta = want - this.facing;
@@ -260,6 +265,7 @@ export class Player {
     this.dog.root.rotation.y = this.facing + Math.PI;
     animateSamoyed(this.dog, {
       speed: planarSpeed,
+      gaitPhase: this.gaitPhase,
       grounded: this.grounded,
       swimming: this.swimming,
       shake: Math.min(1, shake),
@@ -271,6 +277,7 @@ export class Player {
 
     return {
       speed: planarSpeed,
+      gaitPhase: this.gaitPhase,
       grounded: this.grounded,
       swimming: this.swimming,
       wading: this.wading,

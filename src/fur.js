@@ -157,7 +157,12 @@ export class Fur {
       // the shadow, so let the shells skip culling and the shadow pass.
       shells.frustumCulled = false;
       shells.castShadow = false;
-      shells.receiveShadow = true;
+      // Sam does not receive shadows. His own lamp is directly above him, and
+      // the fur shells sit outside the mesh that casts, so every self-shadow
+      // is depth-comparison error rather than real occlusion -- it showed up
+      // as black acne crawling over his coat. The fur's own root darkening
+      // does the self-shading instead.
+      shells.receiveShadow = false;
       shells.name = `${mesh.name}_fur`;
 
       // Parented to the mesh, so it inherits every transform for free.

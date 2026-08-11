@@ -10,6 +10,7 @@ import {
 } from './terrain.js';
 import { buildForest, buildUndergrowth, buildThickets } from './trees.js';
 import { buildMaze } from './maze.js';
+import { createLightShaft } from './lightshaft.js';
 import { buildBridge, bridgeEnds } from './bridge.js';
 import { stone } from './textures.js';
 
@@ -633,6 +634,22 @@ export class Woods {
     lanternLight.position.copy(lantern.position);
     camp.add(lanternLight);
 
+    const lanternShaft = createLightShaft({
+      color: 0xffc070, height: 2.6, radius: 1.5, intensity: 0.5,
+    });
+    lanternShaft.position.copy(lantern.position);
+    camp.add(lanternShaft);
+
+    // The fire throws light up as well as down, so its column points the other
+    // way -- smoke and midges lit from below.
+    const fireShaft = createLightShaft({
+      color: 0xff9a45, height: 5.5, radius: 2.6, intensity: 0.30,
+    });
+    fireShaft.rotation.x = Math.PI; // tip at the flames, opening upward
+    fireShaft.position.set(0, 0.6, 0);
+    camp.add(fireShaft);
+    this._fireShaft = fireShaft;
+
     this.camp = camp;
   }
 
@@ -700,6 +717,9 @@ export class Woods {
       Math.sin(t * 3.1) * 0.08;
     this.fireLight.intensity = 40 * flicker;
     this.glow.scale.setScalar(7 * (0.94 + flicker * 0.09));
+    if (this._fireShaft) {
+      this._fireShaft.userData.uniforms.uIntensity.value = 0.3 * flicker;
+    }
     this.flames.forEach((f, i) => {
       f.scale.set(
         0.9 + Math.sin(t * (9 + i * 3) + i) * 0.13,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CAMERA_FILTER } from './collision.js';
 
 // Third-person follow camera. Orbits the player, eases toward its target so it
 // lags a little behind fast movement, and pulls in when a wall is in the way.
@@ -51,7 +52,7 @@ export class FollowCamera {
     const hit = this.world.castShape(
       this.smoothed, this._identity, dir, this._probe,
       0, this.distance, true,
-      undefined, undefined, this.ignoreCollider ?? undefined
+      undefined, CAMERA_FILTER, this.ignoreCollider ?? undefined
     );
     if (hit) wanted = Math.max(1.4, hit.time_of_impact - 0.1);
 
