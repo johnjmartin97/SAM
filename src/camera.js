@@ -18,6 +18,10 @@ export class FollowCamera {
     this._dist = this.distance; // eased, so the camera never snaps
     this._probe = new RAPIER.Ball(0.35);
     this._identity = { x: 0, y: 0, z: 0, w: 1 };
+    // The cast starts at head height, where the probe overlaps Sam's own
+    // capsule -- so without excluding him every cast reports a hit at zero
+    // distance and the camera pins itself to his back.
+    this.ignoreCollider = null;
   }
 
   update(dt, input, playerPos) {
@@ -46,7 +50,8 @@ export class FollowCamera {
     let wanted = this.distance;
     const hit = this.world.castShape(
       this.smoothed, this._identity, dir, this._probe,
-      0, this.distance, true
+      0, this.distance, true,
+      undefined, undefined, this.ignoreCollider ?? undefined
     );
     if (hit) wanted = Math.max(1.4, hit.time_of_impact - 0.1);
 

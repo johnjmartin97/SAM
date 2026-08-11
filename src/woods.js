@@ -114,7 +114,10 @@ export class Woods {
     this.scene.fog = new THREE.FogExp2(night, 0.105);
 
     // Barely-there moonlight. Enough to separate a tree from the void, no more.
-    const moon = new THREE.HemisphereLight(0x2c3d5c, 0x05070a, 0.16);
+    // The ground colour matters as much as the intensity: with a lamp directly
+    // overhead this is the only light reaching anything's underside, and at
+    // near-black it left Sam's legs looking like they had been cut off.
+    const moon = new THREE.HemisphereLight(0x2c3d5c, 0x232a33, 0.7);
     this.scene.add(moon);
     const moonDir = new THREE.DirectionalLight(0x8fa8d8, 0.14);
     moonDir.position.set(-30, 40, 20);

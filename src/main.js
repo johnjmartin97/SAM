@@ -64,9 +64,10 @@ const fur = new Fur().apply(dog.root);
 // seven times apart in albedo, so one lamp cannot expose both: he has to be
 // turned down at his own materials. Must run after the fur, so the fur shells
 // are covered too.
-const samExposure = applyCharacterExposure(dog.root, { exposure: 0.07, knee: 0.55 });
+const samExposure = applyCharacterExposure(dog.root, { exposure: 1.0, knee: 1.15 });
 const follow = new FollowCamera(camera, world, RAPIER);
 follow.distance = 5.5; // pulled in: the forest is tight and the fog is close
+follow.ignoreCollider = player.collider; // or every cast hits Sam himself
 
 // Sam's own pool of light -- the "circle of vision". Nearly everything the
 // player can see, they can see because of this lamp.
@@ -77,7 +78,7 @@ follow.distance = 5.5; // pulled in: the forest is tight and the fog is close
 // white and bloom turns him into a sun. Lifting the light and softening its
 // falloff keeps the pool on the ground while leaving the dog merely lit.
 const LAMP_HEIGHT = 2.4;
-const lamp = new THREE.PointLight(0xffe9c9, 46, 18, 1.35);
+const lamp = new THREE.PointLight(0xffe9c9, 40, 18, 1.35);
 lamp.castShadow = false; // a second shadow-casting point light is not worth it
 scene.add(lamp);
 

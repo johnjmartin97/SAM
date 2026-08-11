@@ -13,8 +13,11 @@ import * as THREE from 'three';
 // real camera solves this with dynamic range; here the character simply gets
 // his own exposure.
 //
-// The knee is a soft ceiling rather than a hard clamp, so he still shades and
-// still brightens near the campfire instead of flattening to a silhouette.
+// The curve matters more than the amount. Scaling ALL of his light down tames
+// the blown-out top but destroys the dim underside with it -- he ends up white
+// on top and pure black below, split by a hard line. So exposure now sits at
+// 1.0 and the work is done by the knee: a soft shoulder that leaves dim values
+// almost untouched and only rolls off the highlights.
 
 const PATCHED = Symbol('characterExposure');
 
@@ -61,7 +64,7 @@ function patchMaterial(material, uniforms) {
  * Give everything under `root` its own exposure.
  * Call AFTER the fur is applied, so the fur shells are patched too.
  */
-export function applyCharacterExposure(root, { exposure = 0.085, knee = 0.55 } = {}) {
+export function applyCharacterExposure(root, { exposure = 1.0, knee = 1.15 } = {}) {
   const uniforms = {
     exposure: { value: exposure },
     knee: { value: knee },

@@ -69,7 +69,7 @@ export class Fur {
       const uniforms = {
         uLength: { value: length },
         uDensity: { value: 105 },
-        uRootDark: { value: 0.5 },
+        uRootDark: { value: 0.68 },
         uDroop: { value: length * 0.42 },
         // Object-space vectors, refreshed each frame on the CPU so gravity and
         // wind stay world-aligned no matter how the limb is rotated.
