@@ -23,11 +23,13 @@ import make_samoyed  # noqa: E402
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preview")
 
+# (yaw, pitch, distance, target in BLENDER coords). Yaw 0 looks at the tail --
+# the nose points +Y once pt() has converted the model.
 VIEWS = {
-    "side": (90.0, 0.0, 5.4),
-    "front": (0.0, 4.0, 5.0),
-    "three-quarter": (128.0, 14.0, 5.6),
-    "top": (90.0, 72.0, 6.0),
+    "side": (90.0, 0.0, 5.4, (0.0, 0.0, 0.62)),
+    "front": (180.0, 6.0, 4.6, (0.0, 0.0, 0.72)),
+    "three-quarter": (128.0, 14.0, 5.6, (0.0, 0.0, 0.62)),
+    "face": (152.0, 10.0, 1.55, (0.0, 0.66, 0.98)),
 }
 
 
@@ -56,7 +58,7 @@ def studio():
         constraint.target = bpy.context.scene.objects.get("Samoyed")
 
 
-def render(view, yaw_deg, pitch_deg, distance):
+def render(view, yaw_deg, pitch_deg, distance, target):
     scene = bpy.context.scene
     cam_data = bpy.data.cameras.new("Cam")
     cam_data.lens = 70
@@ -64,7 +66,6 @@ def render(view, yaw_deg, pitch_deg, distance):
     bpy.context.collection.objects.link(cam)
     scene.camera = cam
 
-    target = (0.0, 0.0, 0.62)
     yaw = math.radians(yaw_deg)
     pitch = math.radians(pitch_deg)
     cam.location = (
@@ -97,7 +98,7 @@ if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
     make_samoyed.build_mesh()
     studio()
-    for name, (yaw, pitch, dist) in VIEWS.items():
-        render(name, yaw, pitch, dist)
+    for name, (yaw, pitch, dist, target) in VIEWS.items():
+        render(name, yaw, pitch, dist, target)
         print(f"SAM: rendered {name}")
     print(f"SAM: previews in {OUT_DIR}")

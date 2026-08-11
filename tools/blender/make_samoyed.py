@@ -24,6 +24,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bpy  # noqa: E402
 
 from critterlib import join_into, material, reset_scene, shape, skin  # noqa: E402
+
+
+def boolean_cut(target, cutters):
+    """Subtract shapes from a mesh, so a hollow is a real hollow."""
+    for cutter in cutters:
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.context.view_layer.objects.active = target
+        mod = target.modifiers.new("Cut", 'BOOLEAN')
+        mod.operation = 'DIFFERENCE'
+        mod.object = cutter
+        mod.solver = 'EXACT'
+        bpy.ops.object.modifier_apply(modifier=mod.name)
+        bpy.data.objects.remove(cutter, do_unlink=True)
+    bpy.ops.object.select_all(action='DESELECT')
 from rig import bind, build_actions, build_armature  # noqa: E402
 
 OUT = os.path.normpath(
@@ -32,9 +46,15 @@ OUT = os.path.normpath(
 )
 
 CREAM = (0.965, 0.953, 0.933, 1.0)
-DARK = (0.086, 0.086, 0.102, 1.0)
-TONGUE = (0.862, 0.435, 0.463, 1.0)
-INNER_EAR = (0.902, 0.706, 0.686, 1.0)
+# Nose leather and eye rims: near-black, and warm rather than blue-grey. The
+# old value was a mid grey, which is why the face read as plastic.
+NOSE = (0.030, 0.026, 0.026, 1.0)
+# A dog's eye is very dark brown, not black -- the brown only shows where light
+# catches it, which is exactly what makes it look wet rather than painted on.
+EYE = (0.048, 0.028, 0.020, 1.0)
+TONGUE = (0.796, 0.372, 0.404, 1.0)
+# Samoyed inner ear: pink, but it is thin skin over cartilage, so it is muted.
+INNER_EAR = (0.874, 0.596, 0.573, 1.0)
 
 # One surface for the whole animal, so it can be skinned.
 BODY_BUDGET = 22000
@@ -45,9 +65,14 @@ def build_mesh():
     reset_scene()
 
     fur = material("Fur", CREAM)
-    dark = material("Dark", DARK, rough=0.35)
-    tongue_mat = material("Tongue", TONGUE, rough=0.55)
-    ear_mat = material("InnerEar", INNER_EAR, rough=0.7)
+    # A nose is WET. Low roughness is the whole trick: it makes the lamp leave
+    # a sharp highlight on it, which is what the eye reads as moisture.
+    dark = material("Dark", NOSE, rough=0.16)
+    # Glossier still. The catchlight in an eye is the single thing that makes a
+    # face look alive rather than like a doll's.
+    eye_mat = material("Eye", EYE, rough=0.05)
+    tongue_mat = material("Tongue", TONGUE, rough=0.42)
+    ear_mat = material("InnerEar", INNER_EAR, rough=0.62)
 
     # Everything furry, in one list, fused into a single continuous skin.
     # No pivots: the bones articulate the animal now, not object origins.
@@ -97,14 +122,30 @@ def build_mesh():
     body = skin("Samoyed", blobs, fur, BODY_BUDGET, voxel=VOXEL)
 
     details = [
-        shape("sphere", (0.145, 0.125, 0.12), (0, 0.905, -1.03), mat=dark, name="nose"),
-        shape("sphere", (0.20, 0.07, 0.15), (0, 0.828, -0.945), mat=tongue_mat,
+        # Nose leather: wider than deep, with a flat front, not a ball.
+        shape("sphere", (0.132, 0.104, 0.098), (0, 0.906, -1.022), mat=dark,
+              name="nose"),
+        shape("sphere", (0.19, 0.065, 0.14), (0, 0.830, -0.945), mat=tongue_mat,
               name="smile"),
     ]
+    # Nostrils are CUT, not added. Added as geometry they read as two warts
+    # stuck on the end of the nose, which is exactly how the first attempt
+    # looked.
+    nose_obj = details[0]
+    cutters = [shape("sphere", (0.052, 0.060, 0.070), (0.046 * sign, 0.900, -1.070),
+                     name="nostril_cut") for sign in (-1, 1)]
+    boolean_cut(nose_obj, cutters)
+
     for s in (-1, 1):
         details += [
-            shape("sphere", (0.085, 0.10, 0.075), (0.135 * s, 1.025, -0.845),
-                  mat=dark, name="eye"),
+            # The eye rim. Samoyeds are required to have black rims, and it is
+            # what sets the eye INTO the face instead of stuck onto it.
+            shape("sphere", (0.104, 0.090, 0.054), (0.127 * s, 1.017, -0.838),
+                  mat=dark, name="eye_rim"),
+            # The eye itself: smaller, and pushed back into the socket so only
+            # the front of the curve shows.
+            shape("sphere", (0.064, 0.060, 0.052), (0.125 * s, 1.019, -0.866),
+                  mat=eye_mat, name="eye"),
             shape("cone", (0.115, 0.17, 0.075), (0.163 * s, 1.255, -0.655),
                   mat=ear_mat, name="ear_inner", aim=(0.36 * s, 1.0, -0.12)),
         ]
