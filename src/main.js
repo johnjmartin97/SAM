@@ -6,6 +6,8 @@ import { FollowCamera } from './camera.js';
 import { loadSamoyed, createSamoyed } from './samoyed.js';
 import { Fur } from './fur.js';
 import { Woods, SPAWN, CAMP, radialTexture } from './woods.js';
+import { Water } from './water.js';
+import { Droplets, Ripples } from './effects.js';
 
 await RAPIER.init();
 
@@ -23,6 +25,9 @@ const camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.1, 30
 
 const world = new RAPIER.World({ x: 0, y: 0, z: 0 }); // gravity is in the controller
 const woods = new Woods(scene, RAPIER, world);
+const water = new Water(scene);
+const droplets = new Droplets(scene);
+const ripples = new Ripples(scene);
 
 // The campfire throws the only real shadows in the level, which is what makes
 // the clearing feel like a room with walls of trees.
@@ -98,6 +103,8 @@ addEventListener('keydown', (e) => {
 
 let last = performance.now();
 let statsTimer = 0;
+let dripTimer = 0;
+let shakeSpray = 0;
 const wind = new THREE.Vector3();
 
 function frame(now) {
@@ -113,10 +120,42 @@ function frame(now) {
 
   lamp.position.set(pos.x, pos.y + 0.95, pos.z);
   contact.position.set(pos.x, pos.y + 0.02, pos.z);
-  contact.visible = state.grounded;
+  contact.visible = state.grounded && state.submersion < 0.15;
 
   const stage = woods.update(dt, pos);
   if (stage.arrived && !arrived) finish();
+
+  // ---- water ----
+  water.update(dt);
+
+  if (state.entered) droplets.splash(pos, 55, 1.15);
+  if (state.startedShake) shakeSpray = 0.75;
+
+  // A swimming or wading dog leaves a wake.
+  ripples.update(dt, state.submersion > 0.12 && state.speed > 0.6, pos.x, pos.z);
+
+  // Kicked-up spray while wading at speed.
+  if (state.submersion > 0.1 && state.submersion < 0.7 && state.speed > 2.6) {
+    if (Math.random() < state.speed * 0.12) droplets.splash(pos, 3, 0.45);
+  }
+
+  // The shake throws water in every direction for about a second.
+  if (shakeSpray > 0) {
+    shakeSpray -= dt;
+    droplets.shake(pos, player.facing, 5);
+  }
+
+  // Drying off: the wetter he is, the faster he drips.
+  if (state.wetness > 0.04 && state.submersion < 0.1) {
+    dripTimer -= dt;
+    if (dripTimer <= 0) {
+      droplets.drip(pos, 1 + (Math.random() < state.wetness ? 1 : 0));
+      dripTimer = 0.035 + (1 - state.wetness) * 0.5;
+    }
+  }
+
+  droplets.update(dt);
+  fur.setWetness(state.wetness);
 
   wind.copy(player.velocity).multiplyScalar(-0.009);
   wind.y = THREE.MathUtils.clamp(wind.y * 0.6, -0.05, 0.05);
@@ -128,9 +167,11 @@ function frame(now) {
   statsTimer += dt;
   if (statsTimer > 0.15) {
     statsTimer = 0;
+    const wet = state.wetness > 0.05 ? `  ·  ${Math.round(state.wetness * 100)}% wet` : '';
     statsEl.textContent = arrived
       ? 'Stage complete'
       : `${formatTime(elapsed)} in the woods` +
+        (state.swimming ? '  ·  swimming' : '') + wet +
         (input.locked ? '' : ' — click to look around');
   }
 }

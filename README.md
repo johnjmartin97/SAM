@@ -18,7 +18,24 @@ where his owner is waiting. He can only see a few metres around himself, so the
 forest cannot be navigated by memory of the layout — you find your way by
 spotting the firelight glowing above the treetops and walking toward it.
 
+A river runs between him and the camp, so at some point he has to swim. He
+comes out soaked, shakes himself off, and drips for a good while afterwards.
+
 Reaching the fire completes the stage. Press R to go again.
+
+### Checking the ground
+
+The river is cut into the terrain by a height function that both the visible
+ground and the physics are built from. If those two ever disagree you fall
+through the world, and it does not show up in a screenshot, so there is a
+check for it:
+
+```sh
+node tools/check-terrain.mjs
+```
+
+It fires rays at the physics ground and compares where they land against the
+mesh. Run it after changing anything in `src/terrain.js`.
 
 ## Rebuild the dog
 
@@ -38,7 +55,10 @@ than showing nothing.
 | File | What it owns |
 | --- | --- |
 | `src/player.js` | How it feels to move. All the tuning numbers are at the top in `TUNING`. |
-| `src/woods.js` | The forest stage: trees, campsite, darkness, and the win condition. |
+| `src/woods.js` | The forest: tree species, boulders, campsite, darkness, win condition. |
+| `src/terrain.js` | The shape of the ground, including the river valley. One height function feeds the mesh, the physics and every object's placement. |
+| `src/water.js` | The river surface. The shader knows the terrain shape, so the water clips itself exactly at the shoreline. |
+| `src/effects.js` | Splashes, wake rings and the drips off a wet dog. |
 | `src/fur.js` | Sam's coat. Length, density and root darkness are the three knobs at the top. |
 | `src/samoyed.js` | Loading the dog, and the trot/jump animation. |
 | `src/camera.js` | The follow camera, including pulling in when a tree is behind you. |

@@ -142,12 +142,24 @@ export function createSamoyed() {
 
 // Simple procedural animation: a trot cycle that speeds up with movement, plus
 // a tucked pose in the air. Keeps the prototype readable without a rig.
-export function animateSamoyed(dog, { speed, grounded, time, dt }) {
+export function animateSamoyed(
+  dog,
+  { speed, grounded, time, dt, swimming = false, shake = 0 }
+) {
   const gait = Math.min(speed / 6, 1);
   const cycle = time * (6 + gait * 8);
   const swing = gait * 0.85;
 
-  if (grounded) {
+  if (swimming) {
+    // A dog paddle: the front legs do nearly all the work, reaching forward
+    // and pulling down, while the back legs kick shallowly behind.
+    const paddle = time * 13;
+    dog.legs.frontL.rotation.x = -0.35 + Math.sin(paddle) * 0.5;
+    dog.legs.frontR.rotation.x = -0.35 + Math.sin(paddle + Math.PI) * 0.5;
+    dog.legs.backL.rotation.x = 0.3 + Math.sin(paddle + Math.PI) * 0.28;
+    dog.legs.backR.rotation.x = 0.3 + Math.sin(paddle) * 0.28;
+    dog.body.position.y = dog.bodyRestY + Math.sin(time * 2.6) * 0.015;
+  } else if (grounded) {
     dog.legs.frontL.rotation.x = Math.sin(cycle) * swing;
     dog.legs.backR.rotation.x = Math.sin(cycle) * swing;
     dog.legs.frontR.rotation.x = Math.sin(cycle + Math.PI) * swing;
@@ -162,7 +174,19 @@ export function animateSamoyed(dog, { speed, grounded, time, dt }) {
     dog.legs.backR.rotation.x += (0.7 - dog.legs.backR.rotation.x) * t;
   }
 
-  dog.tail.rotation.x = -0.5 + Math.sin(time * 9) * 0.12 * (0.4 + gait);
-  dog.tail.rotation.z = Math.sin(time * 7) * 0.18;
-  dog.head.rotation.x = gait * 0.12;
+  if (swimming) {
+    dog.head.rotation.x = -0.2; // nose held clear of the water
+    dog.tail.rotation.x = -0.1;
+  } else {
+    dog.head.rotation.x = gait * 0.12;
+    dog.tail.rotation.x = -0.5 + Math.sin(time * 9) * 0.12 * (0.4 + gait);
+  }
+
+  // Shaking off: the dog rolls about its own spine, with the head and tail
+  // lagging behind the body -- that lag is what sells it as a whip rather
+  // than a rigid object spinning.
+  const wag = swimming ? 0 : Math.sin(time * 7) * 0.18;
+  dog.body.rotation.z = Math.sin(time * 40) * 0.62 * shake;
+  dog.head.rotation.z = Math.sin(time * 40 - 0.7) * 0.75 * shake;
+  dog.tail.rotation.z = wag + Math.sin(time * 40 - 1.4) * 0.8 * shake;
 }

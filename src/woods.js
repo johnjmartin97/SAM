@@ -1,20 +1,39 @@
 import * as THREE from 'three';
+import {
+  WORLD,
+  WATER_Y,
+  heightAt,
+  buildTerrainMesh,
+  buildTerrainCollider,
+} from './terrain.js';
 
-// A dark pine forest with a campsite somewhere in it.
+// A dark pine forest with a river through it and a campsite somewhere beyond.
 //
 // The stage is a navigation problem, not a platforming one: Sam can only see a
 // few metres in any direction, so the forest has to be readable by landmark
 // rather than by layout. The campfire glow is the one thing that carries
 // through the fog, which makes it the beacon the whole level is built around.
 
-const WORLD = 78; // half-extent of the playable ground
 const TREE_COUNT = 620;
 const FERN_COUNT = 900;
-const ROCK_COUNT = 110;
+const ROCK_COUNT = 140;
+const BOULDER_COUNT = 46;
+const LOG_COUNT = 34;
 
-export const SPAWN = new THREE.Vector3(4, 1.0, 62);
-export const CAMP = new THREE.Vector3(-10, 0, -52);
+// Spawn and campsite sit on opposite banks, so the river always has to be
+// crossed. Their heights come from the terrain, not from guesswork.
+export const SPAWN = new THREE.Vector3(4, heightAt(4, 62) + 0.8, 62);
+export const CAMP = new THREE.Vector3(-10, heightAt(-10, -52), -52);
 export const GOAL_RADIUS = 5.5;
+
+// How the forest is mixed. Weights need not sum to 1.
+const SPECIES = [
+  { kind: 'pine', weight: 0.36 },
+  { kind: 'spruce', weight: 0.26 },
+  { kind: 'birch', weight: 0.18 },
+  { kind: 'dead', weight: 0.13 },
+  { kind: 'stump', weight: 0.07 },
+];
 
 const SPAWN_CLEARING = 7;
 const CAMP_CLEARING = 11;
@@ -94,38 +113,20 @@ export class Woods {
   // -------------------------------------------------------------- ground ---
 
   _buildGround() {
-    const geo = new THREE.PlaneGeometry(WORLD * 2, WORLD * 2, 1, 1);
-    geo.rotateX(-Math.PI / 2);
-    const ground = new THREE.Mesh(geo, standard(0x1a2417, { roughness: 1 }));
-    ground.receiveShadow = true;
-    this.scene.add(ground);
-
-    const body = this.world.createRigidBody(
-      this.RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.5, 0)
-    );
-    this.world.createCollider(
-      this.RAPIER.ColliderDesc.cuboid(WORLD, 0.5, WORLD),
-      body
-    );
-
-    // Invisible walls, so wandering in the dark cannot take you off the map.
-    for (const [x, z, hx, hz] of [
-      [0, -WORLD, WORLD, 1],
-      [0, WORLD, WORLD, 1],
-      [-WORLD, 0, 1, WORLD],
-      [WORLD, 0, 1, WORLD],
-    ]) {
-      const wall = this.world.createRigidBody(
-        this.RAPIER.RigidBodyDesc.fixed().setTranslation(x, 6, z)
-      );
-      this.world.createCollider(this.RAPIER.ColliderDesc.cuboid(hx, 6, hz), wall);
-    }
+    // Both the mesh and the collider come from terrain.js, sampled from the
+    // same height function, so they cannot disagree.
+    this.scene.add(buildTerrainMesh(168));
+    buildTerrainCollider(this.RAPIER, this.world, 160);
   }
 
   // --------------------------------------------------------------- trees ---
 
-  /** Rejection sampling on a grid: cheap, and keeps trees from overlapping. */
-  _scatter(count, minDist, clearings) {
+  /**
+   * Rejection sampling on a grid: cheap, and keeps things from overlapping.
+   * Anything below `minHeight` above the waterline is rejected, which is what
+   * keeps trees out of the river without any explicit river logic here.
+   */
+  _scatter(count, minDist, clearings, minHeight = 0.35) {
     const cell = minDist;
     const grid = new Map();
     const key = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
@@ -134,6 +135,9 @@ export class Woods {
     for (let attempt = 0; attempt < count * 40 && points.length < count; attempt++) {
       const x = (this.rand() * 2 - 1) * (WORLD - 3);
       const z = (this.rand() * 2 - 1) * (WORLD - 3);
+
+      const y = heightAt(x, z);
+      if (y < WATER_Y + minHeight) continue; // in or too near the river
 
       let blocked = false;
       for (const [cx, cz, r] of clearings) {
@@ -157,7 +161,7 @@ export class Woods {
       }
       if (blocked) continue;
 
-      const p = { x, z };
+      const p = { x, z, y };
       points.push(p);
       const k = key(x, z);
       if (!grid.has(k)) grid.set(k, []);
@@ -166,103 +170,281 @@ export class Woods {
     return points;
   }
 
+  /** Pick a species by weight. */
+  _species() {
+    const total = SPECIES.reduce((s, k) => s + k.weight, 0);
+    let r = this.rand() * total;
+    for (const s of SPECIES) {
+      r -= s.weight;
+      if (r <= 0) return s.kind;
+    }
+    return SPECIES[0].kind;
+  }
+
+  /** A trunk collider, so every standing thing is something you bump into. */
+  _trunkCollider(x, y, z, height, radius) {
+    const body = this.world.createRigidBody(
+      this.RAPIER.RigidBodyDesc.fixed().setTranslation(x, y + height / 2, z)
+    );
+    this.world.createCollider(
+      this.RAPIER.ColliderDesc.cylinder(height / 2, radius),
+      body
+    );
+  }
+
   _buildTrees() {
     const spots = this._scatter(TREE_COUNT, 3.0, [
       [SPAWN.x, SPAWN.z, SPAWN_CLEARING],
       [CAMP.x, CAMP.z, CAMP_CLEARING],
     ]);
 
-    const trunkGeo = new THREE.CylinderGeometry(0.17, 0.3, 1, 6);
-    trunkGeo.translate(0, 0.5, 0); // origin at the base, so scaling grows upward
-    const lowerGeo = new THREE.ConeGeometry(1, 1, 7);
-    const upperGeo = new THREE.ConeGeometry(0.68, 1, 7);
-
-    const trunks = new THREE.InstancedMesh(trunkGeo, standard(0x261c14), spots.length);
-    const lower = new THREE.InstancedMesh(lowerGeo, standard(0x12220f), spots.length);
-    const upper = new THREE.InstancedMesh(upperGeo, standard(0x16290f), spots.length);
+    // Sort every spot into a species first, so each instanced mesh can be
+    // allocated at exactly the size it needs.
+    const byKind = { pine: [], spruce: [], birch: [], dead: [], stump: [] };
+    for (const p of spots) byKind[this._species()].push(p);
 
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
-
-    spots.forEach((p, i) => {
-      const height = 6.5 + this.rand() * 6.5;
-      const girth = 0.8 + this.rand() * 0.6;
-      const spread = 1.5 + this.rand() * 0.9;
-      const spin = this.rand() * Math.PI * 2;
-      const lean = (this.rand() - 0.5) * 0.06;
-
-      q.setFromEuler(new THREE.Euler(lean, spin, lean * 0.7));
-
-      m.compose(pos.set(p.x, 0, p.z), q, scl.set(girth, height, girth));
-      trunks.setMatrixAt(i, m);
-
-      const canopyBase = height * 0.34;
-      m.compose(
-        pos.set(p.x, canopyBase, p.z), q,
-        scl.set(spread, height * 0.52, spread)
-      );
-      lower.setMatrixAt(i, m);
-
-      m.compose(
-        pos.set(p.x, canopyBase + height * 0.34, p.z), q,
-        scl.set(spread * 0.82, height * 0.46, spread * 0.82)
-      );
-      upper.setMatrixAt(i, m);
-
-      // One collider per trunk. The canopy is above head height, so it is
-      // decoration only -- you walk into trunks, not branches.
-      const body = this.world.createRigidBody(
-        this.RAPIER.RigidBodyDesc.fixed().setTranslation(p.x, height / 2, p.z)
-      );
-      this.world.createCollider(
-        this.RAPIER.ColliderDesc.cylinder(height / 2, 0.34 * girth),
-        body
-      );
-    });
-
-    for (const im of [trunks, lower, upper]) {
+    const add = (im) => {
       im.instanceMatrix.needsUpdate = true;
       im.castShadow = true;
       im.receiveShadow = true;
       this.scene.add(im);
+    };
+
+    const trunkGeo = new THREE.CylinderGeometry(0.17, 0.3, 1, 6);
+    trunkGeo.translate(0, 0.5, 0); // origin at the base, so scaling grows up
+
+    // ---- pines: two broad conical tiers, the workhorse of the forest ----
+    {
+      const list = byKind.pine;
+      const trunks = new THREE.InstancedMesh(trunkGeo, standard(0x261c14), list.length);
+      const lower = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 1, 7),
+        standard(0x12220f), list.length);
+      const upper = new THREE.InstancedMesh(new THREE.ConeGeometry(0.68, 1, 7),
+        standard(0x16290f), list.length);
+
+      list.forEach((p, i) => {
+        const h = 6.5 + this.rand() * 6.5;
+        const girth = 0.8 + this.rand() * 0.6;
+        const spread = 1.5 + this.rand() * 0.9;
+        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
+
+        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
+        trunks.setMatrixAt(i, m);
+        const base = p.y + h * 0.34;
+        m.compose(pos.set(p.x, base, p.z), q, scl.set(spread, h * 0.52, spread));
+        lower.setMatrixAt(i, m);
+        m.compose(pos.set(p.x, base + h * 0.34, p.z), q,
+          scl.set(spread * 0.82, h * 0.46, spread * 0.82));
+        upper.setMatrixAt(i, m);
+
+        this._trunkCollider(p.x, p.y, p.z, h, 0.34 * girth);
+      });
+      [trunks, lower, upper].forEach(add);
     }
+
+    // ---- spruces: taller, much narrower, three tight tiers ----
+    {
+      const list = byKind.spruce;
+      const trunks = new THREE.InstancedMesh(trunkGeo, standard(0x21180f), list.length);
+      const tiers = [0, 1, 2].map(() => new THREE.InstancedMesh(
+        new THREE.ConeGeometry(1, 1, 6), standard(0x0d1c10), list.length));
+
+      list.forEach((p, i) => {
+        const h = 9 + this.rand() * 7;
+        const girth = 0.6 + this.rand() * 0.35;
+        const spread = 0.95 + this.rand() * 0.5;
+        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
+
+        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
+        trunks.setMatrixAt(i, m);
+        for (let k = 0; k < 3; k++) {
+          const t = k / 3;
+          m.compose(
+            pos.set(p.x, p.y + h * (0.25 + t * 0.26), p.z), q,
+            scl.set(spread * (1 - t * 0.32), h * 0.4, spread * (1 - t * 0.32))
+          );
+          tiers[k].setMatrixAt(i, m);
+        }
+        this._trunkCollider(p.x, p.y, p.z, h, 0.3 * girth);
+      });
+      [trunks, ...tiers].forEach(add);
+    }
+
+    // ---- birches: pale straight trunks, round crowns. They catch the lamp
+    //      and are the main thing that stops the forest reading as one tree
+    //      repeated six hundred times. ----
+    {
+      const list = byKind.birch;
+      const trunks = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.13, 0.17, 1, 7).translate(0, 0.5, 0),
+        standard(0x9a9384), list.length);
+      const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1),
+        standard(0x2c3a1c), list.length);
+
+      list.forEach((p, i) => {
+        const h = 7 + this.rand() * 5;
+        const girth = 0.75 + this.rand() * 0.5;
+        const spread = 1.5 + this.rand() * 0.8;
+        const lean = (this.rand() - 0.5) * 0.13;
+        q.setFromEuler(new THREE.Euler(lean, this.rand() * Math.PI * 2, lean * 0.6));
+
+        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
+        trunks.setMatrixAt(i, m);
+        m.compose(pos.set(p.x + lean * h * 0.5, p.y + h * 0.86, p.z), q,
+          scl.set(spread, spread * 0.85, spread));
+        crown.setMatrixAt(i, m);
+
+        this._trunkCollider(p.x, p.y, p.z, h, 0.22 * girth);
+      });
+      [trunks, crown].forEach(add);
+    }
+
+    // ---- dead trees: bare, forked, no canopy. Pure silhouette. ----
+    {
+      const list = byKind.dead;
+      const trunks = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.06, 0.28, 1, 6).translate(0, 0.5, 0),
+        standard(0x342a20), list.length);
+      const limbs = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.045, 0.1, 1, 5).translate(0, 0.5, 0),
+        standard(0x342a20), list.length * 3);
+
+      let li = 0;
+      list.forEach((p, i) => {
+        const h = 5.5 + this.rand() * 5;
+        const girth = 0.7 + this.rand() * 0.6;
+        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
+        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
+        trunks.setMatrixAt(i, m);
+
+        for (let k = 0; k < 3; k++) {
+          const a = this.rand() * Math.PI * 2;
+          const tilt = 0.7 + this.rand() * 0.5;
+          q.setFromEuler(new THREE.Euler(Math.sin(a) * tilt, a, Math.cos(a) * tilt));
+          m.compose(
+            pos.set(p.x, p.y + h * (0.5 + this.rand() * 0.42), p.z), q,
+            scl.set(1, 1.2 + this.rand() * 1.6, 1)
+          );
+          limbs.setMatrixAt(li++, m);
+        }
+        this._trunkCollider(p.x, p.y, p.z, h, 0.26 * girth);
+      });
+      while (li < list.length * 3) limbs.setMatrixAt(li++, m.makeScale(0, 0, 0));
+      [trunks, limbs].forEach(add);
+    }
+
+    // ---- stumps: knee height, easy to miss in the dark, easy to trip on ----
+    {
+      const list = byKind.stump;
+      const stumps = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(0.42, 0.55, 1, 8).translate(0, 0.5, 0),
+        standard(0x2b2119), list.length);
+      list.forEach((p, i) => {
+        const h = 0.5 + this.rand() * 0.7;
+        const girth = 0.8 + this.rand() * 0.7;
+        q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
+        m.compose(pos.set(p.x, p.y, p.z), q, scl.set(girth, h, girth));
+        stumps.setMatrixAt(i, m);
+        this._trunkCollider(p.x, p.y, p.z, h, 0.5 * girth);
+      });
+      add(stumps);
+    }
+
+    this._buildFallenLogs();
+  }
+
+  /** Logs lying on the ground: obstacles you jump rather than walk round. */
+  _buildFallenLogs() {
+    const spots = this._scatter(LOG_COUNT, 9, [
+      [SPAWN.x, SPAWN.z, SPAWN_CLEARING],
+      [CAMP.x, CAMP.z, CAMP_CLEARING],
+    ], 0.5);
+
+    const geo = new THREE.CylinderGeometry(0.36, 0.44, 1, 8);
+    geo.rotateZ(Math.PI / 2); // lie it down along x
+    const logs = new THREE.InstancedMesh(geo, standard(0x2d2318), spots.length);
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+
+    spots.forEach((p, i) => {
+      const len = 3.5 + this.rand() * 4.5;
+      const girth = 0.75 + this.rand() * 0.6;
+      e.set(0, this.rand() * Math.PI * 2, 0);
+      q.setFromEuler(e);
+      m.compose(
+        new THREE.Vector3(p.x, p.y + 0.36 * girth, p.z), q,
+        new THREE.Vector3(len, girth, girth)
+      );
+      logs.setMatrixAt(i, m);
+
+      // Rapier cylinders stand along Y, so the body carries the rotation that
+      // lays the log on its side and turns it to match.
+      const lay = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(0, e.y, Math.PI / 2, 'YXZ')
+      );
+      const body = this.world.createRigidBody(
+        this.RAPIER.RigidBodyDesc.fixed()
+          .setTranslation(p.x, p.y + 0.36 * girth, p.z)
+          .setRotation({ x: lay.x, y: lay.y, z: lay.z, w: lay.w })
+      );
+      this.world.createCollider(
+        this.RAPIER.ColliderDesc.cylinder(len / 2, 0.4 * girth),
+        body
+      );
+    });
+
+    logs.instanceMatrix.needsUpdate = true;
+    logs.castShadow = true;
+    logs.receiveShadow = true;
+    this.scene.add(logs);
   }
 
   _buildScatter() {
-    // Ferns and rocks: no colliders, purely to stop the ground reading as an
-    // empty plane when the light sweeps over it.
-    const fernGeo = new THREE.ConeGeometry(0.42, 0.75, 5, 1, true);
-    const ferns = new THREE.InstancedMesh(
-      fernGeo,
-      standard(0x203318, { side: THREE.DoubleSide }),
-      FERN_COUNT
-    );
-    const rockGeo = new THREE.IcosahedronGeometry(0.5, 0);
-    const rocks = new THREE.InstancedMesh(rockGeo, standard(0x33383a), ROCK_COUNT);
-
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
 
+    // --- ferns: dressing only, no collision. They keep the ground from
+    //     reading as an empty plane when the lamp sweeps across it. ---
+    const ferns = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.42, 0.75, 5, 1, true),
+      standard(0x203318, { side: THREE.DoubleSide }),
+      FERN_COUNT
+    );
     for (let i = 0; i < FERN_COUNT; i++) {
       const x = (this.rand() * 2 - 1) * (WORLD - 2);
       const z = (this.rand() * 2 - 1) * (WORLD - 2);
+      const y = heightAt(x, z);
       const s = 0.6 + this.rand() * 0.9;
+      // Ferns crowd the damp ground near the river, and thin out up the slope.
+      const damp = y - WATER_Y < 2.2 ? 1 : 0.55;
       q.setFromEuler(new THREE.Euler(0, this.rand() * Math.PI * 2, 0));
-      m.compose(pos.set(x, 0, z), q, scl.set(s, s * (0.7 + this.rand() * 0.6), s));
+      const scale = y > WATER_Y + 0.15 ? s * damp : 0; // never in the water
+      m.compose(pos.set(x, y, z), q,
+        scl.set(scale, scale * (0.7 + this.rand() * 0.6), scale));
       ferns.setMatrixAt(i, m);
     }
+
+    // --- pebbles: small, decorative, allowed in the shallows ---
+    const rocks = new THREE.InstancedMesh(
+      new THREE.IcosahedronGeometry(0.5, 0), standard(0x33383a), ROCK_COUNT
+    );
     for (let i = 0; i < ROCK_COUNT; i++) {
       const x = (this.rand() * 2 - 1) * (WORLD - 2);
       const z = (this.rand() * 2 - 1) * (WORLD - 2);
+      const y = heightAt(x, z);
       const s = 0.4 + this.rand() * 0.8;
       q.setFromEuler(
         new THREE.Euler(this.rand(), this.rand() * Math.PI * 2, this.rand())
       );
-      m.compose(pos.set(x, s * 0.25, z), q, scl.set(s, s * 0.7, s));
+      m.compose(pos.set(x, y + s * 0.2, z), q, scl.set(s, s * 0.7, s));
       rocks.setMatrixAt(i, m);
     }
 
@@ -271,6 +453,64 @@ export class Woods {
       im.receiveShadow = true;
       this.scene.add(im);
     }
+
+    this._buildBoulders();
+  }
+
+  /**
+   * Boulders are big enough to walk into, so unlike the pebbles they get real
+   * collision -- a convex hull of the actual drawn shape, not a stand-in
+   * sphere, so what blocks you is what you can see.
+   */
+  _buildBoulders() {
+    const spots = this._scatter(BOULDER_COUNT, 7, [
+      [SPAWN.x, SPAWN.z, SPAWN_CLEARING * 0.6],
+      [CAMP.x, CAMP.z, CAMP_CLEARING * 0.7],
+    ], -1.4); // allowed to sit in the river, breaking up the current
+
+    const geo = new THREE.IcosahedronGeometry(1, 0);
+    const boulders = new THREE.InstancedMesh(geo, standard(0x3c4145), spots.length);
+    const base = geo.attributes.position.array;
+
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+
+    spots.forEach((p, i) => {
+      const sx = 0.9 + this.rand() * 1.9;
+      const sy = sx * (0.6 + this.rand() * 0.5);
+      const sz = sx * (0.75 + this.rand() * 0.5);
+      const e = new THREE.Euler(
+        (this.rand() - 0.5) * 0.7,
+        this.rand() * Math.PI * 2,
+        (this.rand() - 0.5) * 0.7
+      );
+      q.setFromEuler(e);
+      // Sunk slightly, so boulders look bedded into the ground not dropped on.
+      const y = p.y + sy * 0.55;
+      m.compose(new THREE.Vector3(p.x, y, p.z), q, new THREE.Vector3(sx, sy, sz));
+      boulders.setMatrixAt(i, m);
+
+      // Same vertices, same scale -- the hull is the drawn shape.
+      const hull = new Float32Array(base.length);
+      for (let v = 0; v < base.length; v += 3) {
+        hull[v] = base[v] * sx;
+        hull[v + 1] = base[v + 1] * sy;
+        hull[v + 2] = base[v + 2] * sz;
+      }
+      const desc = this.RAPIER.ColliderDesc.convexHull(hull);
+      if (!desc) return; // degenerate hull: skip rather than crash
+      const body = this.world.createRigidBody(
+        this.RAPIER.RigidBodyDesc.fixed()
+          .setTranslation(p.x, y, p.z)
+          .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w })
+      );
+      this.world.createCollider(desc, body);
+    });
+
+    boulders.instanceMatrix.needsUpdate = true;
+    boulders.castShadow = true;
+    boulders.receiveShadow = true;
+    this.scene.add(boulders);
   }
 
   // ------------------------------------------------------------ campsite ---
@@ -462,7 +702,9 @@ export class Woods {
     for (let i = 0; i < count; i++) {
       const x = (this.rand() * 2 - 1) * (WORLD - 6);
       const z = (this.rand() * 2 - 1) * (WORLD - 6);
-      const y = 0.4 + this.rand() * 2.2;
+      // Fireflies hover just above whatever the ground is doing, including
+      // drifting low over the water.
+      const y = Math.max(WATER_Y, heightAt(x, z)) + 0.4 + this.rand() * 2.2;
       positions.set([x, y, z], i * 3);
       this.fireflySeed.set([x, y, z], i * 3);
     }

@@ -75,6 +75,8 @@ export class Fur {
         // wind stay world-aligned no matter how the limb is rotated.
         uDown: { value: new THREE.Vector3(0, -1, 0) },
         uWind: { value: new THREE.Vector3() },
+        // 0 = dry, 1 = just out of the river.
+        uWet: { value: 0 },
       };
 
       const material = mesh.material.clone();
@@ -91,7 +93,8 @@ export class Fur {
              uniform float uLength;
              uniform float uDroop;
              uniform vec3 uDown;
-             uniform vec3 uWind;`
+             uniform vec3 uWind;
+             uniform float uWet;`
           )
           .replace(
             '#include <begin_vertex>',
@@ -102,8 +105,11 @@ export class Fur {
              // and sways from the tips rather than pivoting at the skin.
              float furT = aShell;
              float bend = furT * furT;
-             transformed += objectNormal * (uLength * furT)
-                          + uDown * (uDroop * bend)
+             // Wet fur lies flat and hangs heavier than dry fur.
+             float wetLen = mix(1.0, 0.42, uWet);
+             float wetDroop = mix(1.0, 1.9, uWet);
+             transformed += objectNormal * (uLength * furT * wetLen)
+                          + uDown * (uDroop * bend * wetDroop)
                           + uWind * bend;`
           );
 
@@ -115,6 +121,7 @@ export class Fur {
              varying vec3 vFurPos;
              uniform float uDensity;
              uniform float uRootDark;
+             uniform float uWet;
              ${COMMON}`
           )
           .replace(
@@ -123,11 +130,16 @@ export class Fur {
              {
                // One strand per cell. Its length is the cell's hash value, so
                // a shell beyond that length simply is not drawn here.
-               float strand = furHash(floor(vFurPos * uDensity));
+               // Wet fur clumps: coarser cells mean fewer, thicker spikes
+               // instead of an even coat.
+               float density = uDensity * mix(1.0, 0.5, uWet);
+               float strand = furHash(floor(vFurPos * density));
                if (strand < vShell) discard;
                // Light does not reach the base of a coat: darken toward the
                // skin. This is what stops the fur looking like a flat decal.
                diffuseColor.rgb *= mix(uRootDark, 1.04, vShell);
+               // Water darkens a coat and kills its sheen.
+               diffuseColor.rgb *= mix(1.0, 0.6, uWet);
              }`
           );
       };
@@ -159,6 +171,11 @@ export class Fur {
       if (LENGTH[o.name] !== undefined) return o.name;
     }
     return mesh.name;
+  }
+
+  /** 0 = dry, 1 = soaked. Drives length, clumping and colour together. */
+  setWetness(w) {
+    for (const { uniforms } of this.meshes) uniforms.uWet.value = w;
   }
 
   /**

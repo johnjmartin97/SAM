@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { animateSamoyed } from './samoyed.js';
+import { heightAt, flowAt, WATER_Y } from './terrain.js';
+import { waveHeight } from './water.js';
 
 // Tuning lives in one place. These numbers are the "feel" of the game.
 export const TUNING = {
@@ -17,12 +19,25 @@ export const TUNING = {
   turnRate: 14, // how fast the dog rotates to face travel direction
   capsuleRadius: 0.3,
   capsuleHalfHeight: 0.25,
+
+  // --- water ---
+  swimSpeed: 2.9,
+  swimAccel: 9,
+  swimTurnRate: 6,
+  paddleLift: 5.5, // holding jump while swimming pushes you up the bank
+  buoyancy: 46, // spring pulling the body toward its floating depth
+  buoyDamping: 7.5, // without this he bobs like a cork forever
+  floatDepth: 0.44, // how far below the surface the feet settle
+  swimThreshold: 0.62, // submersion at which walking becomes swimming
+  currentStrength: 1.0, // multiplier on the river's own flow
+  dryTime: 30, // seconds from soaked to dry, if he does not shake
 };
 
 const FEET_OFFSET = TUNING.capsuleRadius + TUNING.capsuleHalfHeight;
+const BODY_HEIGHT = 1.05; // roughly how tall Sam is, for submersion maths
 
 export class Player {
-  constructor(scene, RAPIER, world, dog, { spawn, killY = -12 } = {}) {
+  constructor(scene, RAPIER, world, dog, { spawn, killY = -30 } = {}) {
     this.RAPIER = RAPIER;
     this.world = world;
     this.spawn = spawn ? spawn.clone() : new THREE.Vector3(0, 1.2, 0);
@@ -47,23 +62,34 @@ export class Player {
     this.controller.setUp({ x: 0, y: 1, z: 0 });
     this.controller.enableAutostep(0.4, 0.2, true);
     this.controller.enableSnapToGround(0.4);
-    this.controller.setMaxSlopeClimbAngle((50 * Math.PI) / 180);
-    this.controller.setMinSlopeSlideAngle((35 * Math.PI) / 180);
+    this.controller.setMaxSlopeClimbAngle((52 * Math.PI) / 180);
+    this.controller.setMinSlopeSlideAngle((38 * Math.PI) / 180);
     this.controller.setApplyImpulsesToDynamicBodies(true);
 
     this.velocity = new THREE.Vector3();
     this.grounded = false;
     this.timeSinceGrounded = 99;
     this.timeSinceJumpPress = 99;
-    this.jumpHeld = false;
-    this.facing = Math.PI; // start looking down the course, not at the camera
+    this.facing = Math.PI;
     this.time = 0;
     this.wasJumpDown = false;
+
+    // --- water state ---
+    this.submersion = 0;
+    this.swimming = false;
+    this.wading = false;
+    this.wetness = 0;
+    this.timeSinceWater = 999;
+    this.hasShaken = true;
+    this.shakeTimer = 0;
+
+    this._flow = new THREE.Vector2();
+    this._pos = new THREE.Vector3();
   }
 
   get position() {
     const t = this.body.translation();
-    return new THREE.Vector3(t.x, t.y - FEET_OFFSET, t.z);
+    return this._pos.set(t.x, t.y - FEET_OFFSET, t.z);
   }
 
   respawn() {
@@ -75,94 +101,184 @@ export class Player {
   update(dt, input, cameraYaw) {
     this.time += dt;
     const T = TUNING;
+    const clamp = THREE.MathUtils.clamp;
 
-    // --- intent, rotated into world space by where the camera is looking ---
+    const t0 = this.body.translation();
+    const feetY = t0.y - FEET_OFFSET;
+
+    // ---------------------------------------------------------- water ---
+    // There is only water here if the ground is below the waterline; the
+    // river carved into the terrain is the only place that is true.
+    const bedY = heightAt(t0.x, t0.z);
+    const surfaceY = WATER_Y + waveHeight(t0.x, t0.z, this.time);
+    const hasWater = bedY < WATER_Y;
+
+    const wasSubmerged = this.submersion;
+    this.submersion = hasWater
+      ? clamp((surfaceY - feetY) / BODY_HEIGHT, 0, 1)
+      : 0;
+
+    this.swimming = this.submersion >= T.swimThreshold;
+    this.wading = !this.swimming && this.submersion > 0.06;
+    const entered = this.submersion > 0.35 && wasSubmerged <= 0.35;
+
+    // ----------------------------------------------------- intent ------
     const axis = input.moveAxis();
     const sin = Math.sin(cameraYaw);
     const cos = Math.cos(cameraYaw);
-    // The camera looks along (-sin, -cos), so forward must carry those signs.
     const wishX = axis.x * cos - axis.y * sin;
     const wishZ = -(axis.x * sin + axis.y * cos);
     const hasInput = axis.x !== 0 || axis.y !== 0;
 
-    const targetSpeed = input.running ? T.runSpeed : T.walkSpeed;
-    const targetX = wishX * targetSpeed;
-    const targetZ = wishZ * targetSpeed;
+    let targetSpeed;
+    let accel;
+    if (this.swimming) {
+      targetSpeed = T.swimSpeed;
+      accel = T.swimAccel;
+    } else {
+      targetSpeed = input.running ? T.runSpeed : T.walkSpeed;
+      // Wading is heavy going: the deeper you are, the more it drags.
+      targetSpeed *= 1 - 0.55 * this.submersion;
+      accel = this.grounded ? (hasInput ? T.groundAccel : T.groundBrake) : T.airAccel;
+    }
 
-    const accel = this.grounded ? (hasInput ? T.groundAccel : T.groundBrake) : T.airAccel;
-    const blend = 1 - Math.exp(-accel * dt); // frame-rate independent approach
-    this.velocity.x += (targetX - this.velocity.x) * blend;
-    this.velocity.z += (targetZ - this.velocity.z) * blend;
+    const blend = 1 - Math.exp(-accel * dt);
+    this.velocity.x += (wishX * targetSpeed - this.velocity.x) * blend;
+    this.velocity.z += (wishZ * targetSpeed - this.velocity.z) * blend;
 
-    // --- jump, with coyote time and input buffering ---
+    // ------------------------------------------------------ vertical ---
     const jumpDown = input.down('Space');
     if (jumpDown && !this.wasJumpDown) this.timeSinceJumpPress = 0;
     this.wasJumpDown = jumpDown;
     this.timeSinceJumpPress += dt;
     this.timeSinceGrounded = this.grounded ? 0 : this.timeSinceGrounded + dt;
 
-    const canJump = this.timeSinceGrounded <= T.coyoteTime;
-    const wantsJump = this.timeSinceJumpPress <= T.jumpBuffer;
-    if (canJump && wantsJump) {
-      this.velocity.y = Math.sqrt(2 * T.gravity * T.jumpHeight);
-      this.timeSinceJumpPress = 99;
-      this.timeSinceGrounded = 99;
-      this.grounded = false;
+    if (this.swimming) {
+      // Buoyancy as a damped spring toward the floating depth. The wave term
+      // is already in surfaceY, so he genuinely rides the swell.
+      const floatY = surfaceY - T.floatDepth;
+      const err = floatY - feetY;
+      this.velocity.y +=
+        (err * T.buoyancy - this.velocity.y * T.buoyDamping) * dt;
+      if (jumpDown) this.velocity.y += T.paddleLift * dt;
+      this.velocity.y = clamp(this.velocity.y, -5, 5);
+    } else {
+      const canJump = this.timeSinceGrounded <= T.coyoteTime;
+      const wantsJump = this.timeSinceJumpPress <= T.jumpBuffer;
+      if (canJump && wantsJump) {
+        this.velocity.y = Math.sqrt(2 * T.gravity * T.jumpHeight);
+        this.timeSinceJumpPress = 99;
+        this.timeSinceGrounded = 99;
+        this.grounded = false;
+      }
+      let g = T.gravity;
+      if (this.velocity.y < 0) g *= T.fallGravityBoost;
+      else if (this.velocity.y > 0 && !jumpDown) g *= T.lowJumpBoost;
+      this.velocity.y -= g * dt;
+      this.velocity.y = Math.max(this.velocity.y, -40);
     }
 
-    // Variable-height jump: fall faster, and cut the rise if Space is released.
-    let g = T.gravity;
-    if (this.velocity.y < 0) g *= T.fallGravityBoost;
-    else if (this.velocity.y > 0 && !jumpDown) g *= T.lowJumpBoost;
-    this.velocity.y -= g * dt;
-    this.velocity.y = Math.max(this.velocity.y, -40);
-
-    // --- resolve movement against the world ---
+    // -------------------------------------------------------- resolve ---
     const desired = {
       x: this.velocity.x * dt,
       y: this.velocity.y * dt,
       z: this.velocity.z * dt,
     };
+
+    // The current carries him downstream whether he likes it or not, and
+    // grips harder the deeper he is in the channel.
+    if (this.submersion > 0.2) {
+      flowAt(t0.x, t0.z, this._flow);
+      const grip = this.submersion * T.currentStrength;
+      desired.x += this._flow.x * grip * dt;
+      desired.z += this._flow.y * grip * dt;
+    }
+
     this.controller.computeColliderMovement(this.collider, desired);
     const moved = this.controller.computedMovement();
-    const t = this.body.translation();
     this.body.setNextKinematicTranslation({
-      x: t.x + moved.x,
-      y: t.y + moved.y,
-      z: t.z + moved.z,
+      x: t0.x + moved.x,
+      y: t0.y + moved.y,
+      z: t0.z + moved.z,
     });
 
     const wasGrounded = this.grounded;
-    this.grounded = this.controller.computedGrounded();
+    this.grounded = this.controller.computedGrounded() && !this.swimming;
     if (this.grounded && this.velocity.y < 0) this.velocity.y = 0;
-    // Stopped short vertically without being grounded means we hit a ceiling.
-    if (!this.grounded && this.velocity.y > 0 && Math.abs(moved.y - desired.y) > 1e-4) {
+    if (!this.swimming && !this.grounded && this.velocity.y > 0 &&
+        Math.abs(moved.y - desired.y) > 1e-4) {
       this.velocity.y = 0;
     }
     this.justLanded = this.grounded && !wasGrounded;
 
-    // --- face the direction of travel ---
+    // ---------------------------------------------------------- facing ---
     const planarSpeed = Math.hypot(this.velocity.x, this.velocity.z);
-    if (planarSpeed > 0.4) {
+    if (planarSpeed > 0.35) {
       const want = Math.atan2(this.velocity.x, this.velocity.z);
       let delta = want - this.facing;
-      delta = Math.atan2(Math.sin(delta), Math.cos(delta)); // shortest way round
-      this.facing += delta * (1 - Math.exp(-T.turnRate * dt));
+      delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+      const rate = this.swimming ? T.swimTurnRate : T.turnRate;
+      this.facing += delta * (1 - Math.exp(-rate * dt));
     }
 
-    // --- present ---
+    // --------------------------------------------------------- wetness ---
+    if (this.submersion > 0.15) {
+      this.wetness = 1;
+      this.timeSinceWater = 0;
+      this.hasShaken = false;
+    } else {
+      this.timeSinceWater += dt;
+      this.wetness = Math.max(0, this.wetness - dt / T.dryTime);
+    }
+
+    // A dog out of a river shakes itself as soon as it has its feet under it.
+    let startedShake = false;
+    if (
+      !this.hasShaken &&
+      this.wetness > 0.55 &&
+      this.timeSinceWater > 1.2 &&
+      this.grounded &&
+      planarSpeed < 1.5
+    ) {
+      this.shakeTimer = 1.05;
+      this.hasShaken = true;
+      startedShake = true;
+    }
+    if (this.shakeTimer > 0) {
+      this.shakeTimer -= dt;
+      this.wetness = Math.max(0.22, this.wetness - dt * 0.42);
+    }
+    // Ramp the shake in and out so it does not start and stop with a snap.
+    const shake =
+      this.shakeTimer > 0
+        ? Math.sin(clamp(this.shakeTimer / 1.05, 0, 1) * Math.PI) * 1.6
+        : 0;
+
+    // ----------------------------------------------------------- present ---
     const p = this.position;
     this.dog.root.position.copy(p);
-    this.dog.root.rotation.y = this.facing + Math.PI; // model faces -Z
+    this.dog.root.rotation.y = this.facing + Math.PI;
     animateSamoyed(this.dog, {
       speed: planarSpeed,
       grounded: this.grounded,
+      swimming: this.swimming,
+      shake: Math.min(1, shake),
       time: this.time,
       dt,
     });
 
     if (p.y < this.killY) this.respawn();
 
-    return { speed: planarSpeed, grounded: this.grounded };
+    return {
+      speed: planarSpeed,
+      grounded: this.grounded,
+      swimming: this.swimming,
+      wading: this.wading,
+      submersion: this.submersion,
+      wetness: this.wetness,
+      shaking: this.shakeTimer > 0,
+      startedShake,
+      entered,
+    };
   }
 }
