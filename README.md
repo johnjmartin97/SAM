@@ -21,6 +21,18 @@ spotting the firelight glowing above the treetops and walking toward it.
 A river runs between him and the camp, so at some point he has to swim. He
 comes out soaked, shakes himself off, and drips for a good while afterwards.
 
+The forest is a maze. Bands of impassable thicket divide it into corridors, so
+knowing which way camp lies is not the same as being able to walk there — the
+straight-line distance is 115 m and the shortest actual route is about 180 m,
+through nineteen dead ends. The campfire glow above the treetops is deliberately
+kept: the challenge is finding a route, not guessing a direction. A forest with
+no landmark at all is not hard, just random.
+
+Two things are not walled: six clearings, scattered as landmarks you can
+recognise and reorient from, and the river itself. Swimming is a fast way
+across the map, at the cost of getting soaked and being pushed off course by
+the current.
+
 Reaching the fire completes the stage. Press R to go again.
 
 ### Checking the ground
@@ -36,6 +48,29 @@ node tools/check-terrain.mjs
 
 It fires rays at the physics ground and compares where they land against the
 mesh. Run it after changing anything in `src/terrain.js`.
+
+### Checking the maze
+
+A maze that seals the campsite off looks perfectly fine in a screenshot and is
+only discovered by a player wandering for ten minutes. So the same maze the
+game builds is generated in Node and solved before anyone plays it:
+
+```sh
+node tools/check-maze.mjs
+```
+
+It reports the route length, how much longer that is than the straight line,
+and the number of dead ends — and fails if the camp is unreachable or the route
+is too straight to be a maze.
+
+`src/maze.js` is deliberately pure — no three.js, no browser — which is what
+makes that possible. Difficulty is one number, `braid` in `MAZE_OPTIONS`
+(`src/woods.js`): lower is more maze-like. 0.06 gives a 1.9x windier route,
+0.30 nearly opens the forest back up.
+
+Corridors are kept passable **by construction**: nothing that collides is
+allowed within 1.7 m of a corridor centreline, so no randomly placed tree can
+ever plug a route the solver believed was open.
 
 ## Rebuild the dog
 
@@ -56,7 +91,8 @@ than showing nothing.
 | --- | --- |
 | `src/player.js` | How it feels to move. All the tuning numbers are at the top in `TUNING`. |
 | `src/woods.js` | Lays out the level: what goes where, the campsite, darkness, win condition. |
-| `src/trees.js` | The nine tree species, how a tree is built, and foliage collision. |
+| `src/trees.js` | The nine tree species, how a tree is built, foliage collision, thickets. |
+| `src/maze.js` | The maze layout. Pure logic, so it can be solved outside the game. |
 | `src/textures.js` | Every texture in the game, drawn in code on a canvas. Nothing is downloaded. |
 | `src/terrain.js` | The shape of the ground, including the river valley. One height function feeds the mesh, the physics and every object's placement. |
 | `src/water.js` | The river surface. The shader knows the terrain shape, so the water clips itself exactly at the shoreline. |

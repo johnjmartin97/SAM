@@ -580,3 +580,134 @@ export function buildUndergrowth(scene, RAPIER, world, spots, rand, { collide = 
   scene.add(im);
   return im;
 }
+
+/* --------------------------------------------------------------- thickets -- */
+
+/**
+ * The maze walls: bands of impassable scrub, deadfall and young conifers.
+ *
+ * Collision is ONE box per wall rather than a collider per bush. That keeps
+ * the count sane, and more importantly it makes the barrier exactly the thing
+ * check-maze.mjs reasons about -- no chance of a gap opening up between two
+ * bushes that the solver believed was sealed. The box is set narrower than the
+ * planting, so you push into the foliage before you stop rather than hitting
+ * an invisible wall in mid-air.
+ */
+export function buildThickets(scene, RAPIER, world, walls, rand, heightAt) {
+  const scrubMat = new THREE.MeshStandardMaterial({
+    map: TEX.scrub(31),
+    alphaTest: 0.42,
+    side: THREE.DoubleSide,
+    roughness: 0.92,
+  });
+  applyWind(scrubMat, 1.1);
+  scrubMat.customProgramCacheKey = () => 'wind-thicket';
+
+  const needleMat = new THREE.MeshStandardMaterial({
+    map: TEX.needleSpray(37),
+    alphaTest: 0.42,
+    side: THREE.DoubleSide,
+    roughness: 0.9,
+  });
+  applyWind(needleMat, 0.8);
+  needleMat.customProgramCacheKey = () => 'wind-thicket-needle';
+
+  const cardGeo = new THREE.PlaneGeometry(1, 1);
+  const scrubCards = [];
+  const needleCards = [];
+
+  const origin = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const HALF_THICK = 0.8; // collider half-depth; planting spreads wider
+
+  for (const w of walls) {
+    const alongX = w.axis === 'x';
+    const len = w.length;
+
+    // --- the barrier itself ---
+    const body = world.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(w.cx, heightAt(w.cx, w.cz) + 1.1, w.cz)
+    );
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(
+        alongX ? len / 2 : HALF_THICK,
+        1.5,
+        alongX ? HALF_THICK : len / 2
+      ),
+      body
+    );
+
+    // --- the planting that explains it ---
+    const clumps = 7;
+    for (let k = 0; k < clumps; k++) {
+      const t = (k + 0.5) / clumps;
+      const jitterAcross = (rand() - 0.5) * 1.7;
+      const x = alongX
+        ? w.x1 + (w.x2 - w.x1) * t + (rand() - 0.5) * 0.8
+        : w.cx + jitterAcross;
+      const z = alongX
+        ? w.cz + jitterAcross
+        : w.z1 + (w.z2 - w.z1) * t + (rand() - 0.5) * 0.8;
+      const y = heightAt(x, z);
+      const tint = new THREE.Color(0x3c5427).multiplyScalar(0.62 + rand() * 0.55);
+
+      // Low scrub, splayed outward.
+      const bushCards = 5 + ((rand() * 4) | 0);
+      const size = 1.1 + rand() * 1.1;
+      for (let i = 0; i < bushCards; i++) {
+        const a = (i / bushCards) * Math.PI * 2 + rand() * 0.8;
+        dir.set(Math.cos(a), 0.3 + rand() * 0.8, Math.sin(a));
+        origin.set(x, y + 0.05, z);
+        const cm = new THREE.Matrix4();
+        cardMatrix(cm, origin, dir, size * (0.85 + rand() * 0.6), size, rand() * 6.28);
+        scrubCards.push({
+          matrix: cm,
+          color: tint.clone().multiplyScalar(0.82 + rand() * 0.4),
+        });
+      }
+
+      // Every other clump gets a young conifer, for height and silhouette.
+      if (rand() < 0.55) {
+        const h = 1.6 + rand() * 2.2;
+        const whorls = 5;
+        for (let wI = 0; wI < whorls; wI++) {
+          const ft = wI / (whorls - 1);
+          const per = 5;
+          const radius = (1.3 - ft * 0.95) * (0.7 + rand() * 0.5);
+          for (let i = 0; i < per; i++) {
+            const a = (i / per) * Math.PI * 2 + wI * 1.3;
+            dir.set(Math.cos(a), -0.42 + (rand() - 0.5) * 0.2, Math.sin(a));
+            origin.set(x, y + 0.25 + ft * h * 0.85, z);
+            const cm = new THREE.Matrix4();
+            cardMatrix(cm, origin, dir, radius * 1.25, radius * 0.95, rand() * 6.28);
+            needleCards.push({
+              matrix: cm,
+              color: new THREE.Color(0x35522c).multiplyScalar(0.7 + rand() * 0.5),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const add = (items, mat) => {
+    if (!items.length) return null;
+    const im = new THREE.InstancedMesh(cardGeo, mat, items.length);
+    items.forEach((it, i) => {
+      im.setMatrixAt(i, it.matrix);
+      im.setColorAt(i, it.color);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.castShadow = false;
+    im.receiveShadow = true;
+    im.frustumCulled = false;
+    scene.add(im);
+    return im;
+  };
+
+  add(scrubCards, scrubMat);
+  add(needleCards, needleMat);
+
+  return { cards: scrubCards.length + needleCards.length, walls: walls.length };
+}

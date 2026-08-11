@@ -6,7 +6,8 @@ import {
   buildTerrainMesh,
   buildTerrainCollider,
 } from './terrain.js';
-import { buildForest, buildUndergrowth } from './trees.js';
+import { buildForest, buildUndergrowth, buildThickets } from './trees.js';
+import { buildMaze } from './maze.js';
 import { stone } from './textures.js';
 
 // A dark pine forest with a river through it and a campsite somewhere beyond.
@@ -31,6 +32,16 @@ export const GOAL_RADIUS = 5.5;
 
 const SPAWN_CLEARING = 7;
 const CAMP_CLEARING = 11;
+
+// The maze. Exported so tools/check-maze.mjs can build an identical one and
+// prove the campsite is reachable before anyone plays the stage.
+export const MAZE_SEED = 90210;
+export const MAZE_OPTIONS = {
+  braid: 0.12,      // how many walls get knocked back out: higher = more open
+  clearings: 6,     // landmark cells, opened on every side
+  openRadius: 13,   // spawn and camp are never walled in
+  clearance: 1.7,   // clear tube kept down every corridor, in metres
+};
 
 /** Small deterministic RNG, so the forest is the same every run. */
 function rng(seed) {
@@ -80,8 +91,14 @@ export class Woods {
     this.time = 0;
     this.rand = rng(20260811);
 
+    this.maze = buildMaze(WORLD, MAZE_SEED, {
+      ...MAZE_OPTIONS,
+      openAt: [SPAWN, CAMP],
+    });
+
     this._buildAtmosphere();
     this._buildGround();
+    this._buildThickets();
     this._buildTrees();
     this._buildScatter();
     this._buildCampsite();
@@ -120,7 +137,8 @@ export class Woods {
    * Anything below `minHeight` above the waterline is rejected, which is what
    * keeps trees out of the river without any explicit river logic here.
    */
-  _scatter(count, minDist, clearings, minHeight = 0.35) {
+  _scatter(count, minDist, clearings, minHeight = 0.35,
+           clearance = MAZE_OPTIONS.clearance) {
     const cell = minDist;
     const grid = new Map();
     const key = (x, z) => `${Math.floor(x / cell)},${Math.floor(z / cell)}`;
@@ -132,6 +150,11 @@ export class Woods {
 
       const y = heightAt(x, z);
       if (y < WATER_Y + minHeight) continue; // in or too near the river
+
+      // Keep a clear tube down every corridor. This is what makes the maze
+      // passable by construction: no random tree can ever plug a route, so
+      // the only thing blocking Sam is a wall the checker knows about.
+      if (this.maze.corridorDistance(x, z) < clearance) continue;
 
       let blocked = false;
       for (const [cx, cz, r] of clearings) {
@@ -162,6 +185,20 @@ export class Woods {
       grid.get(k).push(p);
     }
     return points;
+  }
+
+  _buildThickets() {
+    // Walls standing in the river are skipped, so the water stays a route --
+    // a fast, wet shortcut with a current that pushes you off course.
+    const walls = this.maze.walls().filter((w) => {
+      if (heightAt(w.cx, w.cz) < WATER_Y + 0.3) return false;
+      const nearSpawn = Math.hypot(w.cx - SPAWN.x, w.cz - SPAWN.z) < SPAWN_CLEARING;
+      const nearCamp = Math.hypot(w.cx - CAMP.x, w.cz - CAMP.z) < CAMP_CLEARING;
+      return !nearSpawn && !nearCamp;
+    });
+    this.thickets = buildThickets(
+      this.scene, this.RAPIER, this.world, walls, this.rand, heightAt
+    );
   }
 
   _buildTrees() {

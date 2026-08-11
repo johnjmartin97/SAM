@@ -32,9 +32,9 @@ const camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.1, 30
 const world = new RAPIER.World({ x: 0, y: 0, z: 0 }); // gravity is in the controller
 const woods = new Woods(scene, RAPIER, world);
 console.log(
-  `SAM: forest built — ${woods.forest.counts.trees} trees, ` +
-  `${woods.forest.counts.cards} foliage cards, ` +
-  `${world.colliders.len()} colliders`
+  `SAM: forest — ${woods.forest.counts.trees} trees, ` +
+  `${woods.forest.counts.cards + woods.thickets.cards} foliage cards, ` +
+  `${woods.thickets.walls} thicket walls, ${world.colliders.len()} colliders`
 );
 const water = new Water(scene);
 const droplets = new Droplets(scene);
