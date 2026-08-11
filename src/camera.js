@@ -7,7 +7,7 @@ export class FollowCamera {
     this.camera = camera;
     this.world = world;
     this.RAPIER = RAPIER;
-    this.yaw = Math.PI;
+    this.yaw = 0; // sits behind the player looking down the course (-Z)
     this.pitch = 0.28;
     this.distance = 7;
     this.sensitivity = 0.0022;

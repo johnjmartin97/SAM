@@ -55,7 +55,7 @@ export class Player {
     this.timeSinceGrounded = 99;
     this.timeSinceJumpPress = 99;
     this.jumpHeld = false;
-    this.facing = 0;
+    this.facing = Math.PI; // start looking down the course, not at the camera
     this.time = 0;
     this.wasJumpDown = false;
   }
@@ -78,8 +78,9 @@ export class Player {
     const axis = input.moveAxis();
     const sin = Math.sin(cameraYaw);
     const cos = Math.cos(cameraYaw);
+    // The camera looks along (-sin, -cos), so forward must carry those signs.
     const wishX = axis.x * cos - axis.y * sin;
-    const wishZ = axis.x * sin + axis.y * cos;
+    const wishZ = -(axis.x * sin + axis.y * cos);
     const hasInput = axis.x !== 0 || axis.y !== 0;
 
     const targetSpeed = input.running ? T.runSpeed : T.walkSpeed;
