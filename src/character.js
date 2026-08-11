@@ -47,9 +47,13 @@ function patchMaterial(material, uniforms) {
       );
   };
 
+  // customProgramCacheKey is a method on Material.prototype, so it always
+  // exists and the default implementation reads `this`. It has to be called
+  // bound to the material -- calling it detached throws.
   const previousKey = material.customProgramCacheKey;
-  material.customProgramCacheKey = () =>
-    `${previousKey ? previousKey() : ''}|charexp`;
+  material.customProgramCacheKey = function () {
+    return `${previousKey.call(this)}|charexp`;
+  };
   material.needsUpdate = true;
 }
 
