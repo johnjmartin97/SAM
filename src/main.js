@@ -3,7 +3,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { Input } from './input.js';
 import { Player } from './player.js';
 import { FollowCamera } from './camera.js';
-import { loadSamoyed, createSamoyed } from './samoyed.js';
+import { loadSamoyed } from './samoyed.js';
 import { Fur } from './fur.js';
 import { Woods, SPAWN, CAMP, radialTexture } from './woods.js';
 import { Water } from './water.js';
@@ -48,13 +48,9 @@ woods.fireLight.shadow.camera.near = 0.4;
 woods.fireLight.shadow.camera.far = 34;
 woods.fireLight.shadow.bias = -0.005;
 
-let dog;
-try {
-  dog = await loadSamoyed();
-} catch (err) {
-  console.warn('SAM: falling back to the placeholder dog —', err.message);
-  dog = createSamoyed();
-}
+// No placeholder fallback any more: the dog IS the rig and the clips, and a
+// box standing in for it would hide a broken export rather than survive one.
+const dog = await loadSamoyed();
 
 const ambience = new Ambience();
 // Browsers refuse to start audio until the user does something; the existing
@@ -67,7 +63,7 @@ const wildlife = new Wildlife(scene, animalModels, Math.random);
 
 const input = new Input(renderer.domElement);
 const player = new Player(scene, RAPIER, world, dog, { spawn: SPAWN, killY: -20 });
-const fur = new Fur().apply(dog.root);
+const fur = new Fur().apply(dog);
 
 // Sam gets his own exposure. A white dog and a dark forest floor are about
 // seven times apart in albedo, so one lamp cannot expose both: he has to be

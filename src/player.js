@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { animateSamoyed } from './samoyed.js';
 import { heightAt, flowAt, WATER_Y } from './terrain.js';
 import { waveHeight } from './water.js';
 
@@ -263,15 +262,14 @@ export class Player {
     const p = this.position;
     this.dog.root.position.copy(p);
     this.dog.root.rotation.y = this.facing + Math.PI;
-    animateSamoyed(this.dog, {
+    // The model owns its own animation now: it is handed the situation and
+    // picks and blends the clip. Nothing here computes a joint angle.
+    this.dog.update(dt, {
       speed: planarSpeed,
-      gaitPhase: this.gaitPhase,
       grounded: this.grounded,
       swimming: this.swimming,
-      shake: Math.min(1, shake),
-      time: this.time,
-      dt,
     });
+    if (startedShake) this.dog.shake();
 
     if (p.y < this.killY) this.respawn();
 
